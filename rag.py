@@ -3,13 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 
 from schemas import RagCitation
 
-EMBED_MODEL = "text-embedding-3-small"
 KB_PATH = Path("data/eu261_kb.jsonl")
 CACHE_PATH = Path("data/eu261_embeddings_cache.npz")
 
@@ -40,14 +39,8 @@ def _stable_hash_embedding(text: str, dim: int = 256) -> np.ndarray:
     return vec / norm if norm > 0 else vec
 
 
-def _normalize(vec: np.ndarray) -> np.ndarray:
-    norm = np.linalg.norm(vec)
-    return vec / norm if norm > 0 else vec
-
-
 class Eu261RAG:
-    def __init__(self, openai_client: Optional[object] = None):
-        self.client = openai_client
+    def __init__(self):
         self.kb_rows = _load_kb()
         self._embeddings = self._load_or_build_embeddings()
 
@@ -70,24 +63,12 @@ class Eu261RAG:
             np.savez(CACHE_PATH, embeddings=arr, fingerprint=np.array([fingerprint], dtype=str))
             return arr
 
-        if self.client is None:
-            emb = np.vstack([_stable_hash_embedding(row["text"]) for row in self.kb_rows]).astype(np.float32)
-            np.savez(CACHE_PATH, embeddings=emb, fingerprint=np.array([fingerprint], dtype=str))
-            return emb
-
-        texts = [row["text"] for row in self.kb_rows]
-        resp = self.client.embeddings.create(model=EMBED_MODEL, input=texts)
-        emb = np.array([item.embedding for item in resp.data], dtype=np.float32)
-        norms = np.linalg.norm(emb, axis=1, keepdims=True)
-        emb = np.divide(emb, norms, out=np.zeros_like(emb), where=norms > 0)
+        emb = np.vstack([_stable_hash_embedding(row["text"]) for row in self.kb_rows]).astype(np.float32)
         np.savez(CACHE_PATH, embeddings=emb, fingerprint=np.array([fingerprint], dtype=str))
         return emb
 
     def embed_query(self, query: str) -> np.ndarray:
-        if self.client is None:
-            return _stable_hash_embedding(query)
-        resp = self.client.embeddings.create(model=EMBED_MODEL, input=[query])
-        return _normalize(np.array(resp.data[0].embedding, dtype=np.float32))
+        return _stable_hash_embedding(query)
 
     def retrieve(self, query: str, k: int = 4) -> List[RagCitation]:
         if not self.kb_rows:
@@ -107,4 +88,3 @@ class Eu261RAG:
                 )
             )
         return out
-

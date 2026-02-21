@@ -19,10 +19,10 @@ init_db()
 st.title("EU261 Compensation Claim Agent")
 st.caption("Hackathon demo app with tool-calling orchestrator + deterministic fallback mode.")
 
-if os.getenv("OPENAI_API_KEY"):
-    st.success("Mode: OpenAI tool-calling")
+if os.getenv("ANTHROPIC_API_KEY"):
+    st.success("Mode: Claude tool-calling")
 else:
-    st.warning("Mode: Deterministic fallback (no OPENAI_API_KEY)")
+    st.warning("Mode: Deterministic fallback (no ANTHROPIC_API_KEY)")
 
 with st.sidebar:
     st.header("Claim Intake")
@@ -128,4 +128,3 @@ if plan is not None:
             st.code(t)
 else:
     st.info("Fill intake fields in the sidebar and click 'Run Agent'.")
-

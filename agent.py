@@ -16,9 +16,9 @@ from tools import (
 )
 
 try:
-    from openai import OpenAI
+    from anthropic import Anthropic
 except Exception:  # pragma: no cover
-    OpenAI = None
+    Anthropic = None
 
 
 SYSTEM_PROMPT = (
@@ -28,19 +28,18 @@ SYSTEM_PROMPT = (
 )
 
 
-def _build_openai_client() -> Optional[object]:
-    if not os.getenv("OPENAI_API_KEY") or OpenAI is None:
+def _build_claude_client() -> Optional[object]:
+    if not os.getenv("ANTHROPIC_API_KEY") or Anthropic is None:
         return None
-    return OpenAI()
+    return Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
 def _tool_spec() -> List[Dict[str, Any]]:
     return [
         {
-            "type": "function",
             "name": "rag_policy",
             "description": "Retrieve relevant EU261 policy snippets with citations.",
-            "parameters": {
+            "input_schema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
@@ -50,40 +49,48 @@ def _tool_spec() -> List[Dict[str, Any]]:
             },
         },
         {
-            "type": "function",
             "name": "check_eu261",
             "description": "Heuristic EU261 eligibility check with compensation bracket.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
         {
-            "type": "function",
             "name": "find_claim_channel",
             "description": "Find airline claim submission route from local provider directory.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
         {
-            "type": "function",
             "name": "draft_email",
             "description": "Draft EU261 complaint email.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
         {
-            "type": "function",
             "name": "form_payload_preview",
             "description": "Generate form payload preview for provider forms.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     ]
 
 
-def _extract_text(response: Any) -> str:
-    out = []
-    for item in getattr(response, "output", []) or []:
-        if getattr(item, "type", None) == "message":
-            for c in getattr(item, "content", []) or []:
-                if getattr(c, "type", None) in {"output_text", "text"}:
-                    out.append(getattr(c, "text", ""))
-    return "\n".join([x for x in out if x]).strip()
+def _extract_text_from_claude(response: Any) -> str:
+    texts: List[str] = []
+    for block in getattr(response, "content", []) or []:
+        if getattr(block, "type", None) == "text":
+            texts.append(getattr(block, "text", ""))
+    return "\n".join([x for x in texts if x]).strip()
+
+
+def _block_to_message_content(block: Any) -> Dict[str, Any]:
+    block_type = getattr(block, "type", None)
+    if block_type == "text":
+        return {"type": "text", "text": getattr(block, "text", "")}
+    if block_type == "tool_use":
+        return {
+            "type": "tool_use",
+            "id": getattr(block, "id", ""),
+            "name": getattr(block, "name", ""),
+            "input": getattr(block, "input", {}),
+        }
+    return {"type": "text", "text": ""}
 
 
 def _fallback_plan(intake: ClaimIntake, rag: Eu261RAG) -> ClaimPlan:
@@ -110,8 +117,8 @@ def _fallback_plan(intake: ClaimIntake, rag: Eu261RAG) -> ClaimPlan:
 
 
 def run_claim_agent(intake: ClaimIntake, max_iters: int = 7) -> ClaimPlan:
-    client = _build_openai_client()
-    rag = Eu261RAG(openai_client=client)
+    client = _build_claude_client()
+    rag = Eu261RAG()
     if client is None:
         plan = _fallback_plan(intake, rag)
         log_event(intake.claim_id, "agent_run", {"mode": "fallback", "tool_trace": plan.tool_trace})
@@ -157,33 +164,43 @@ def run_claim_agent(intake: ClaimIntake, max_iters: int = 7) -> ClaimPlan:
         "and then either draft_email or form_payload_preview.\n"
         f"Intake JSON:\n{intake.model_dump_json(indent=2)}"
     )
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        instructions=SYSTEM_PROMPT,
-        input=user_prompt,
+    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_prompt}]
+
+    response = client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=900,
+        system=SYSTEM_PROMPT,
         tools=_tool_spec(),
-        tool_choice="auto",
+        messages=messages,
     )
 
     for _ in range(max_iters):
-        function_calls = [o for o in (response.output or []) if getattr(o, "type", None) == "function_call"]
-        if not function_calls:
+        tool_uses = [b for b in (response.content or []) if getattr(b, "type", None) == "tool_use"]
+        if not tool_uses:
             break
-        outputs = []
-        for call in function_calls:
-            tool_name = call.name
-            args = json.loads(call.arguments or "{}")
+
+        tool_results = []
+        for tool_use in tool_uses:
+            tool_name = tool_use.name
+            args = tool_use.input or {}
             result = call_local_tool(tool_name, args)
             tool_trace.append(f"{tool_name}({args})")
-            outputs.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(result)})
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": json.dumps(result, ensure_ascii=True),
+                }
+            )
 
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            instructions=SYSTEM_PROMPT,
-            previous_response_id=response.id,
-            input=outputs,
+        messages.append({"role": "assistant", "content": [_block_to_message_content(b) for b in response.content]})
+        messages.append({"role": "user", "content": tool_results})
+        response = client.messages.create(
+            model="claude-3-5-sonnet-latest",
+            max_tokens=900,
+            system=SYSTEM_PROMPT,
             tools=_tool_spec(),
-            tool_choice="auto",
+            messages=messages,
         )
 
     if eligibility is None:
@@ -197,6 +214,7 @@ def run_claim_agent(intake: ClaimIntake, max_iters: int = 7) -> ClaimPlan:
     if channel.channel_type == "form" and form_preview is None:
         form_preview = build_form_payload_preview(intake, eligibility, channel)
 
+    summary = _extract_text_from_claude(response)
     plan = ClaimPlan(
         intake=intake,
         eligibility=eligibility,
@@ -204,12 +222,12 @@ def run_claim_agent(intake: ClaimIntake, max_iters: int = 7) -> ClaimPlan:
         draft=draft,
         form_payload_preview=form_preview,
         rag_citations=citations,
-        tool_trace=tool_trace + ([f"assistant_summary::{_extract_text(response)[:180]}"] if _extract_text(response) else []),
+        tool_trace=tool_trace + ([f"assistant_summary::{summary[:180]}"] if summary else []),
     )
     log_event(
         intake.claim_id,
         "agent_run",
-        {"mode": "openai_tools", "tool_trace": plan.tool_trace, "response_id": getattr(response, "id", None)},
+        {"mode": "claude_tools", "tool_trace": plan.tool_trace, "response_id": getattr(response, "id", None)},
     )
     return plan
 

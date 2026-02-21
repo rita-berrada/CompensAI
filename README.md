@@ -5,9 +5,9 @@ Hackathon-ready Streamlit app that collects flight delay intake, runs an orchest
 ## Features
 
 - Streamlit intake form for EU261 claims
-- Orchestrator agent with bounded tool-calling loop (Responses API)
-- Local RAG over `data/eu261_kb.jsonl` with cached embeddings in `data/eu261_embeddings_cache.npz`
-- Deterministic fallback mode when `OPENAI_API_KEY` is missing
+- Orchestrator agent with bounded Claude tool-calling loop (Anthropic Messages API)
+- Local RAG over `data/eu261_kb.jsonl` with cached local embeddings in `data/eu261_embeddings_cache.npz`
+- Deterministic fallback mode when `ANTHROPIC_API_KEY` is missing
 - Human-in-the-loop approval/edit step before simulated submission
 - Event logging to:
   - `logs/events.jsonl`
@@ -33,10 +33,10 @@ Hackathon-ready Streamlit app that collects flight delay intake, runs an orchest
 pip install -r requirements.txt
 ```
 
-2. Optional: enable OpenAI mode:
+2. Optional: enable Claude mode:
 
 ```bash
-export OPENAI_API_KEY=your_key_here
+export ANTHROPIC_API_KEY=your_key_here
 ```
 
 3. Run app:
@@ -63,5 +63,5 @@ streamlit run app.py
 ## Notes
 
 - Fallback mode requires no API key and still produces deterministic output via heuristics and templates.
-- OpenAI mode uses function/tool calling and embeddings model `text-embedding-3-small`.
+- Claude mode uses Anthropic tool calling for orchestration; RAG embeddings are local/deterministic.
 - This is a demo assistant and not legal advice.
