@@ -209,3 +209,4 @@ __marimo__/
 logs/
 data/eu261_embeddings_cache.npz
 data/eu261_rag.sqlite
+data/regulatory_lexical.sqlite

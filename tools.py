@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from db import log_event
+from regulatory_engine import evaluate_case
 from rag import Eu261RAG
 from schemas import ClaimChannel, ClaimIntake, EmailDraft, EligibilityResult, FormPayloadPreview
 
@@ -31,43 +32,30 @@ def rag_policy(rag: Eu261RAG, query: str, k: int = 4) -> Dict[str, Any]:
 
 
 def check_eu261(intake: ClaimIntake) -> EligibilityResult:
-    legal_basis = "EU261/2004 compensation typically applies for arrival delays >= 3 hours."
-    missing_info: List[str] = []
-    if intake.distance_km is None:
-        missing_info.append("distance_km")
-    if intake.arrival_delay_hours < 3:
-        return EligibilityResult(
-            eligible=False,
-            compensation_eur=None,
-            rationale=f"Reported arrival delay is {intake.arrival_delay_hours:.1f}h, below the 3h threshold.",
-            legal_basis=legal_basis,
-            missing_info=missing_info,
-            confidence=0.86,
-        )
-
-    comp = None
-    if intake.distance_km is not None:
-        d = intake.distance_km
-        if d <= 1500:
-            comp = 250
-        elif d <= 3500:
-            comp = 400
-        else:
-            comp = 600
-
-    rationale = "Arrival delay meets >=3h heuristic."
-    if comp is not None:
-        rationale += f" Distance {intake.distance_km:.0f}km suggests {comp} EUR bracket."
-    else:
-        rationale += " Distance missing; compensation bracket cannot be finalized."
-
+    evaluation = evaluate_case(
+        case_type="flight",
+        payload={
+            "provider": intake.provider,
+            "flight_number": intake.flight_number,
+            "flight_date": intake.flight_date.isoformat(),
+            "departure_airport": intake.departure_airport,
+            "arrival_airport": intake.arrival_airport,
+            "arrival_delay_hours": intake.arrival_delay_hours,
+            "distance_km": intake.distance_km,
+            "passenger_name": intake.passenger_name,
+            "passenger_email": str(intake.passenger_email),
+            "notes": intake.notes,
+        },
+    )
+    compensation = evaluation.get("compensation_eur")
+    comp_int = int(compensation) if compensation is not None else None
     return EligibilityResult(
-        eligible=True,
-        compensation_eur=comp,
-        rationale=rationale,
-        legal_basis=legal_basis,
-        missing_info=missing_info,
-        confidence=0.79 if comp is None else 0.9,
+        eligible=bool(evaluation.get("eligible", False)),
+        compensation_eur=comp_int,
+        rationale=str(evaluation.get("rationale", "Regulatory assessment completed.")),
+        legal_basis=str(evaluation.get("legal_basis", "Regulation (EC) No 261/2004")),
+        missing_info=[str(x) for x in (evaluation.get("missing_info") or [])],
+        confidence=float(evaluation.get("confidence", 0.75)),
     )
 
 

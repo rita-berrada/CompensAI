@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 import re
 from typing import Any, Dict, List, Literal, Optional
 
@@ -124,6 +126,11 @@ POLICIES: Dict[CaseType, PolicySpec] = {
     ),
 }
 
+try:
+    from anthropic import Anthropic
+except Exception:  # pragma: no cover
+    Anthropic = None
+
 
 def _normalize(value: Optional[str]) -> str:
     return (value or "").strip().lower()
@@ -178,8 +185,69 @@ def infer_case_type(payload: Dict[str, Any]) -> CaseType:
     return "unknown"
 
 
-def assess_case_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    case_type = infer_case_type(payload)
+def _extract_text_from_anthropic_response(response: Any) -> str:
+    parts: List[str] = []
+    for block in getattr(response, "content", []) or []:
+        if getattr(block, "type", None) == "text":
+            parts.append(getattr(block, "text", ""))
+    return "\n".join([p for p in parts if p]).strip()
+
+
+def classify_case_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    heuristic = infer_case_type(payload)
+    if not os.getenv("ANTHROPIC_API_KEY") or Anthropic is None:
+        return {
+            "case_type": heuristic,
+            "confidence": 0.65,
+            "reasoning": "Heuristic classifier used (LLM unavailable).",
+            "mode": "heuristic",
+        }
+
+    try:
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        email_text = str(payload.get("email_text") or payload.get("body") or payload.get("message") or "")
+        compact_payload = {k: v for k, v in payload.items() if k not in {"email_text", "body", "message"}}
+        prompt = (
+            "Classify this complaint into exactly one case type: "
+            "flight, rail, bus_coach, sea, parcel_delivery, package_travel, unknown.\n"
+            "Return strict JSON only with keys: case_type, confidence, reasoning.\n"
+            f"Email text:\n{email_text}\n\n"
+            f"Other payload fields:\n{json.dumps(compact_payload, ensure_ascii=True)}"
+        )
+        response = client.messages.create(
+            model="claude-3-5-haiku-latest",
+            max_tokens=220,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = _extract_text_from_anthropic_response(response)
+        start = text.find("{")
+        end = text.rfind("}")
+        parsed = json.loads(text[start : end + 1]) if start >= 0 and end > start else {}
+        case_type = str(parsed.get("case_type", "")).strip().lower()
+        if case_type not in POLICIES:
+            case_type = heuristic
+        confidence = float(parsed.get("confidence", 0.7))
+        reasoning = str(parsed.get("reasoning", "")).strip() or "LLM classifier result."
+        return {
+            "case_type": case_type,
+            "confidence": max(0.0, min(1.0, confidence)),
+            "reasoning": reasoning,
+            "mode": "llm",
+        }
+    except Exception:
+        return {
+            "case_type": heuristic,
+            "confidence": 0.6,
+            "reasoning": "Heuristic fallback used (LLM classification failed).",
+            "mode": "heuristic_fallback",
+        }
+
+
+def assess_case_payload(payload: Dict[str, Any], case_type_override: Optional[str] = None) -> Dict[str, Any]:
+    case_type = str(case_type_override).strip().lower() if case_type_override else infer_case_type(payload)
+    if case_type not in POLICIES:
+        case_type = "unknown"
     spec = POLICIES[case_type]
 
     present_fields: List[str] = []
