@@ -6,7 +6,7 @@ Hackathon-ready Streamlit app that collects flight delay intake, runs an orchest
 
 - Streamlit intake form for EU261 claims
 - Orchestrator agent with bounded Claude tool-calling loop (Anthropic Messages API)
-- Local RAG over `data/eu261_kb.jsonl` with cached local embeddings in `data/eu261_embeddings_cache.npz`
+- Local RAG over `data/eu261_kb.jsonl` with a persisted SQLite FTS index in `data/eu261_rag.sqlite`
 - Deterministic fallback mode when `ANTHROPIC_API_KEY` is missing
 - Human-in-the-loop approval/edit step before simulated submission
 - Event logging to:
@@ -23,6 +23,7 @@ Hackathon-ready Streamlit app that collects flight delay intake, runs an orchest
 - `/Users/natalia2/hackeurope/compensation-agent/schemas.py`
 - `/Users/natalia2/hackeurope/compensation-agent/data/providers.json`
 - `/Users/natalia2/hackeurope/compensation-agent/data/eu261_kb.jsonl`
+- `/Users/natalia2/hackeurope/compensation-agent/data/eu261_rag.sqlite` (auto-generated index)
 - `/Users/natalia2/hackeurope/compensation-agent/requirements.txt`
 
 ## Setup
@@ -48,7 +49,9 @@ streamlit run app.py
 ## Demo Steps
 
 1. Open the Streamlit app.
-2. Fill intake in the sidebar (provider, flight, delay, passenger details).
+2. In sidebar, choose input mode:
+   - `JSON file`: upload JSON containing structured fields and/or `email_text`.
+   - `Manual`: fill provider, flight, delay, and passenger details.
 3. Click **Run Agent**.
 4. Review:
    - Eligibility + rationale + confidence
@@ -63,5 +66,6 @@ streamlit run app.py
 ## Notes
 
 - Fallback mode requires no API key and still produces deterministic output via heuristics and templates.
-- Claude mode uses Anthropic tool calling for orchestration; RAG embeddings are local/deterministic.
+- Claude mode uses Anthropic tool calling for orchestration; RAG retrieval is served from a local SQLite FTS index (BM25).
 - This is a demo assistant and not legal advice.
+- JSON intake accepts common keys (`provider`, `flight_number`, `flight_date`, `departure_airport`, `arrival_airport`, `arrival_delay_hours`, `distance_km`, `passenger_name`, `passenger_email`, `notes`) and can also extract these from raw `email_text` when possible.

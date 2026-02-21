@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import uuid
-from datetime import date
+from datetime import date, datetime
+from typing import Any, Dict, Optional
 
 import streamlit as st
 from pydantic import ValidationError
@@ -10,11 +13,140 @@ from pydantic import ValidationError
 from agent import run_claim_agent
 from db import init_db, log_event
 from schemas import ClaimIntake
-from tools import log_human_review
+from tools import load_providers, log_human_review
 
 
 st.set_page_config(page_title="EU261 Compensation Claim Agent", layout="wide")
 init_db()
+
+
+def _get_nested_value(payload: Dict[str, Any], path: str) -> Any:
+    cur: Any = payload
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
+
+
+def _first_value(payload: Dict[str, Any], candidates: list[str]) -> Any:
+    for key in candidates:
+        if "." in key:
+            value = _get_nested_value(payload, key)
+            if value is not None:
+                return value
+        elif key in payload and payload[key] is not None:
+            return payload[key]
+    return None
+
+
+def _coerce_date(value: Any) -> Optional[date]:
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    patterns = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
+    for pattern in patterns:
+        try:
+            return datetime.strptime(raw, pattern).date()
+        except ValueError:
+            continue
+
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _extract_from_email_text(email_text: str) -> Dict[str, Any]:
+    text = email_text or ""
+    lower_text = text.lower()
+
+    provider = None
+    for provider_cfg in load_providers():
+        names = [provider_cfg.get("name", "")] + provider_cfg.get("aliases", [])
+        for name in names:
+            if name and name.lower() in lower_text:
+                provider = provider_cfg.get("name")
+                break
+        if provider:
+            break
+
+    email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    flight_match = re.search(r"\b([A-Z]{2,3}\s?\d{2,4})\b", text)
+    route_match = re.search(r"\b([A-Z]{3})\s*(?:->|-|to)\s*([A-Z]{3})\b", text, flags=re.IGNORECASE)
+    delay_match = re.search(
+        r"(?:arrival\s+)?delay(?:ed)?[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)",
+        lower_text,
+    )
+    distance_match = re.search(r"(\d{3,5}(?:\.\d+)?)\s*(?:km|kilometers|kilometres)\b", lower_text)
+    name_match = re.search(r"(?:passenger|name)\s*[:\-]\s*([^\n,]+)", text, flags=re.IGNORECASE)
+
+    date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+    if date_match is None:
+        date_match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", text)
+    if date_match is None:
+        date_match = re.search(r"\b(\d{2}-\d{2}-\d{4})\b", text)
+
+    return {
+        "provider": provider,
+        "flight_number": flight_match.group(1).replace(" ", "") if flight_match else None,
+        "flight_date": _coerce_date(date_match.group(1)) if date_match else None,
+        "departure_airport": route_match.group(1).upper() if route_match else None,
+        "arrival_airport": route_match.group(2).upper() if route_match else None,
+        "arrival_delay_hours": _coerce_float(delay_match.group(1)) if delay_match else None,
+        "distance_km": _coerce_float(distance_match.group(1)) if distance_match else None,
+        "passenger_name": name_match.group(1).strip() if name_match else None,
+        "passenger_email": email_match.group(0) if email_match else None,
+        "notes": text.strip(),
+    }
+
+
+def _parse_intake_json(payload: Dict[str, Any]) -> Dict[str, Any]:
+    email_text = _first_value(payload, ["email_text", "email.body", "email.text", "message", "body", "text"])
+    from_email = _extract_from_email_text(str(email_text)) if email_text else {}
+
+    provider = _first_value(payload, ["provider", "airline", "carrier"]) or from_email.get("provider")
+    flight_number = _first_value(payload, ["flight_number", "flightNo", "flight.no"]) or from_email.get("flight_number")
+    flight_date_raw = _first_value(payload, ["flight_date", "date", "flight.date"]) or from_email.get("flight_date")
+    departure_airport = _first_value(payload, ["departure_airport", "origin", "from", "route.from"]) or from_email.get("departure_airport")
+    arrival_airport = _first_value(payload, ["arrival_airport", "destination", "to", "route.to"]) or from_email.get("arrival_airport")
+    arrival_delay_hours = _first_value(payload, ["arrival_delay_hours", "delay_hours", "delay", "delay_h"]) or from_email.get("arrival_delay_hours")
+    distance_km = _first_value(payload, ["distance_km", "distance", "distanceKm"]) or from_email.get("distance_km")
+    passenger_name = _first_value(payload, ["passenger_name", "name", "passenger.name"]) or from_email.get("passenger_name")
+    passenger_email = _first_value(payload, ["passenger_email", "email", "passenger.email"]) or from_email.get("passenger_email")
+    notes = _first_value(payload, ["notes", "description", "issue"]) or from_email.get("notes") or ""
+
+    return {
+        "provider": str(provider).strip() if provider is not None else None,
+        "flight_number": str(flight_number).strip() if flight_number is not None else None,
+        "flight_date": _coerce_date(flight_date_raw),
+        "departure_airport": str(departure_airport).strip().upper() if departure_airport is not None else None,
+        "arrival_airport": str(arrival_airport).strip().upper() if arrival_airport is not None else None,
+        "arrival_delay_hours": _coerce_float(arrival_delay_hours),
+        "distance_km": _coerce_float(distance_km),
+        "passenger_name": str(passenger_name).strip() if passenger_name is not None else None,
+        "passenger_email": str(passenger_email).strip() if passenger_email is not None else None,
+        "notes": str(notes).strip(),
+    }
+
 
 st.title("EU261 Compensation Claim Agent")
 st.caption("Hackathon demo app with tool-calling orchestrator + deterministic fallback mode.")
@@ -26,34 +158,67 @@ else:
 
 with st.sidebar:
     st.header("Claim Intake")
-    provider = st.text_input("Airline/Provider", value="Lufthansa")
-    flight_number = st.text_input("Flight Number", value="LH123")
-    flight_date = st.date_input("Flight Date", value=date.today())
-    departure_airport = st.text_input("Departure Airport", value="FRA")
-    arrival_airport = st.text_input("Arrival Airport", value="MAD")
-    arrival_delay_hours = st.number_input("Arrival Delay (hours)", min_value=0.0, max_value=24.0, value=3.5, step=0.5)
-    distance_km = st.number_input("Distance (km, optional)", min_value=0.0, value=1450.0, step=10.0)
-    use_distance = st.checkbox("Include distance", value=True)
-    passenger_name = st.text_input("Passenger Name", value="Jane Doe")
-    passenger_email = st.text_input("Passenger Email", value="jane.doe@example.com")
-    notes = st.text_area("Notes", value="Flight arrived late due to operational issues.")
+    intake_mode = st.radio("Input Mode", options=["JSON file", "Manual"], horizontal=True)
+    intake_data: Dict[str, Any] = {}
+
+    if intake_mode == "JSON file":
+        uploaded = st.file_uploader("Upload intake JSON", type=["json"])
+        if uploaded is not None:
+            try:
+                payload = json.loads(uploaded.getvalue().decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("Root JSON value must be an object")
+                intake_data = _parse_intake_json(payload)
+                st.caption("Extracted intake values")
+                st.json(intake_data)
+            except Exception as exc:
+                st.error(f"Failed to parse JSON: {exc}")
+    else:
+        provider = st.text_input("Airline/Provider", value="Lufthansa")
+        flight_number = st.text_input("Flight Number", value="LH123")
+        flight_date = st.date_input("Flight Date", value=date.today())
+        departure_airport = st.text_input("Departure Airport", value="FRA")
+        arrival_airport = st.text_input("Arrival Airport", value="MAD")
+        arrival_delay_hours = st.number_input("Arrival Delay (hours)", min_value=0.0, max_value=24.0, value=3.5, step=0.5)
+        distance_km = st.number_input("Distance (km, optional)", min_value=0.0, value=1450.0, step=10.0)
+        use_distance = st.checkbox("Include distance", value=True)
+        passenger_name = st.text_input("Passenger Name", value="Jane Doe")
+        passenger_email = st.text_input("Passenger Email", value="jane.doe@example.com")
+        notes = st.text_area("Notes", value="Flight arrived late due to operational issues.")
+        intake_data = {
+            "provider": provider,
+            "flight_number": flight_number,
+            "flight_date": flight_date,
+            "departure_airport": departure_airport,
+            "arrival_airport": arrival_airport,
+            "arrival_delay_hours": arrival_delay_hours,
+            "distance_km": distance_km if use_distance else None,
+            "passenger_name": passenger_name,
+            "passenger_email": passenger_email,
+            "notes": notes,
+        }
+
     run_agent = st.button("Run Agent", type="primary")
 
 if run_agent:
+    if intake_mode == "JSON file" and not intake_data:
+        st.error("Upload a valid JSON file first.")
+        st.stop()
+
     claim_id = str(uuid.uuid4())
     try:
         intake = ClaimIntake(
             claim_id=claim_id,
-            provider=provider,
-            flight_number=flight_number,
-            flight_date=flight_date,
-            departure_airport=departure_airport,
-            arrival_airport=arrival_airport,
-            arrival_delay_hours=arrival_delay_hours,
-            distance_km=(distance_km if use_distance else None),
-            passenger_name=passenger_name,
-            passenger_email=passenger_email,
-            notes=notes,
+            provider=intake_data.get("provider"),
+            flight_number=intake_data.get("flight_number"),
+            flight_date=intake_data.get("flight_date"),
+            departure_airport=intake_data.get("departure_airport"),
+            arrival_airport=intake_data.get("arrival_airport"),
+            arrival_delay_hours=intake_data.get("arrival_delay_hours"),
+            distance_km=intake_data.get("distance_km"),
+            passenger_name=intake_data.get("passenger_name"),
+            passenger_email=intake_data.get("passenger_email"),
+            notes=intake_data.get("notes", ""),
         )
     except ValidationError as e:
         st.error(f"Invalid intake data: {e}")
@@ -127,4 +292,4 @@ if plan is not None:
         for t in plan.tool_trace:
             st.code(t)
 else:
-    st.info("Fill intake fields in the sidebar and click 'Run Agent'.")
+    st.info("Upload JSON or fill manual intake, then click 'Run Agent'.")

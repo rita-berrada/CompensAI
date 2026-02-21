@@ -208,3 +208,4 @@ __marimo__/
 # Project runtime artifacts
 logs/
 data/eu261_embeddings_cache.npz
+data/eu261_rag.sqlite
