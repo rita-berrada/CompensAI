@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,10 +13,16 @@ PROVIDERS_PATH = Path("data/providers.json")
 
 
 def load_providers() -> List[Dict[str, Any]]:
+    return _load_providers_cached()
+
+
+@lru_cache(maxsize=1)
+def _load_providers_cached() -> List[Dict[str, Any]]:
     if not PROVIDERS_PATH.exists():
         return []
     with PROVIDERS_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    return data if isinstance(data, list) else []
 
 
 def rag_policy(rag: Eu261RAG, query: str, k: int = 4) -> Dict[str, Any]:
@@ -66,9 +73,11 @@ def check_eu261(intake: ClaimIntake) -> EligibilityResult:
 
 def find_claim_channel(provider: str) -> ClaimChannel:
     providers = load_providers()
-    lower = provider.strip().lower()
+    lower = (provider or "").strip().lower()
+    if not lower:
+        return ClaimChannel(provider=provider or "Unknown", channel_type="unknown", notes="Provider is missing.")
     for p in providers:
-        aliases = [p.get("name", "").lower()] + [a.lower() for a in p.get("aliases", [])]
+        aliases = [str(p.get("name", "")).lower()] + [str(a).lower() for a in p.get("aliases", [])]
         if lower in aliases:
             ch = p.get("channel", {})
             ch_type = ch.get("type", "unknown")

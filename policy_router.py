@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 CaseType = Literal["flight", "rail", "bus_coach", "sea", "parcel_delivery", "package_travel", "unknown"]
@@ -130,7 +131,10 @@ def _normalize(value: Optional[str]) -> str:
 
 def _contains_any(text: str, words: List[str]) -> bool:
     text_l = _normalize(text)
-    return any(w in text_l for w in words)
+    if not text_l:
+        return False
+    # Use word boundaries to avoid false positives like "support" matching "port".
+    return any(re.search(rf"\b{re.escape(w)}\b", text_l) is not None for w in words)
 
 
 def infer_case_type(payload: Dict[str, Any]) -> CaseType:

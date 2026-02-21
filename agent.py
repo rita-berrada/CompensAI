@@ -134,7 +134,13 @@ def run_claim_agent(intake: ClaimIntake, max_iters: int = 7) -> ClaimPlan:
     def call_local_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         nonlocal eligibility, channel, draft, form_preview, citations
         if name == "rag_policy":
-            res = rag_policy(rag, query=arguments.get("query", ""), k=int(arguments.get("k", 4)))
+            raw_k = arguments.get("k", 4)
+            try:
+                k = int(raw_k)
+            except (TypeError, ValueError):
+                k = 4
+            k = max(1, min(8, k))
+            res = rag_policy(rag, query=str(arguments.get("query", "")), k=k)
             citations = [RagCitation(**c) for c in res.get("citations", [])]
             return res
         if name == "check_eu261":
@@ -230,4 +236,3 @@ def run_claim_agent(intake: ClaimIntake, max_iters: int = 7) -> ClaimPlan:
         {"mode": "claude_tools", "tool_trace": plan.tool_trace, "response_id": getattr(response, "id", None)},
     )
     return plan
-
