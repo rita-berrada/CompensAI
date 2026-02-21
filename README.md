@@ -69,3 +69,11 @@ streamlit run app.py
 - Claude mode uses Anthropic tool calling for orchestration; RAG retrieval is served from a local SQLite FTS index (BM25).
 - This is a demo assistant and not legal advice.
 - JSON intake accepts common keys (`provider`, `flight_number`, `flight_date`, `departure_airport`, `arrival_airport`, `arrival_delay_hours`, `distance_km`, `passenger_name`, `passenger_email`, `notes`) and can also extract these from raw `email_text` when possible.
+- JSON intake now performs case-type policy checks for:
+  - `flight` -> Regulation (EC) No 261/2004
+  - `rail` -> Regulation (EU) 2021/782
+  - `bus_coach` -> Regulation (EU) No 181/2011
+  - `sea` -> Regulation (EU) No 1177/2010
+  - `parcel_delivery` -> Directive 2011/83/EU (delivery/refund timeline)
+  - `package_travel` -> Directive (EU) 2015/2302
+- Non-flight cases (`rail`, `bus_coach`, `sea`, `parcel_delivery`, `package_travel`) now include automated eligibility heuristics, claim draft generation, and simulated submission logging in the same human-in-the-loop flow.

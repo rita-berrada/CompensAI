@@ -1,0 +1,13 @@
+{
+  "case_type": "bus_coach",
+  "carrier": "FlixBus",
+  "service_number": "FB-2401",
+  "travel_date": "2026-03-01",
+  "departure_station": "Prague Florenc",
+  "arrival_station": "Vienna Erdberg",
+  "departure_delay_minutes": 130,
+  "journey_distance_km": 333,
+  "passenger_name": "Marta Novak",
+  "passenger_email": "marta.novak@example.com",
+  "notes": "Departure delayed by over 2 hours on long-distance route."
+}

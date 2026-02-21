@@ -1,0 +1,13 @@
+{
+  "case_type": "rail",
+  "carrier": "Deutsche Bahn",
+  "train_number": "ICE 594",
+  "travel_date": "2026-02-12",
+  "departure_station": "Berlin Hbf",
+  "arrival_station": "Munich Hbf",
+  "arrival_delay_minutes": 95,
+  "passenger_name": "Alex Meyer",
+  "passenger_email": "alex.meyer@example.com",
+  "ticket_price_eur": 89.5,
+  "notes": "Train arrived 95 minutes late, requesting compensation."
+}

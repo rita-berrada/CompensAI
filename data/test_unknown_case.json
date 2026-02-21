@@ -1,0 +1,7 @@
+{
+  "subject": "Request for refund",
+  "description": "My scooter rental app overcharged me and support is unresponsive.",
+  "customer_name": "Paolo Ricci",
+  "customer_email": "paolo.ricci@example.com",
+  "amount_eur": 19.99
+}
