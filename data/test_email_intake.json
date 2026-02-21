@@ -1,4 +1,0 @@
-{
-  "source": "customer_email",
-  "email_text": "Subject: EU261 compensation request for delayed flight\n\nHello Lufthansa claims team,\n\nPassenger: Jane Doe\nEmail: jane.doe@example.com\nFlight: LH123\nDate: 2026-02-10\nRoute: FRA -> MAD\nArrival delay: 3.5 hours\nDistance: 1450 km\n\nMy flight was significantly delayed due to operational issues. Please process compensation under EU261.\n\nKind regards,\nJane Doe"
-}
