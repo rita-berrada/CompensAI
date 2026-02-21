@@ -49,9 +49,7 @@ streamlit run app.py
 ## Demo Steps
 
 1. Open the Streamlit app.
-2. In sidebar, choose input mode:
-   - `JSON file`: upload JSON containing structured fields and/or `email_text`.
-   - `Manual`: fill provider, flight, delay, and passenger details.
+2. In sidebar, upload a JSON file containing structured fields and/or `email_text`.
 3. Click **Run Agent**.
 4. Review:
    - Eligibility + rationale + confidence

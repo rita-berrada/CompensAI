@@ -160,65 +160,31 @@ else:
 
 with st.sidebar:
     st.header("Claim Intake")
-    intake_mode = st.radio("Input Mode", options=["JSON file", "Manual"], horizontal=True)
     intake_data: Dict[str, Any] = {}
     case_assessment: Optional[Dict[str, Any]] = None
     source_payload: Dict[str, Any] = {}
-
-    if intake_mode == "JSON file":
-        uploaded = st.file_uploader("Upload intake JSON", type=["json"])
-        if uploaded is not None:
-            try:
-                payload = json.loads(uploaded.getvalue().decode("utf-8"))
-                if not isinstance(payload, dict):
-                    raise ValueError("Root JSON value must be an object")
-                source_payload = dict(payload)
-                intake_data = _parse_intake_json(payload)
-                assessment_payload = dict(payload)
-                assessment_payload.update({k: v for k, v in intake_data.items() if v is not None and str(v).strip()})
-                case_assessment = assess_case_payload(assessment_payload)
-                st.caption("Extracted intake values")
-                st.json(intake_data)
-                st.caption("Detected policy and case requirements")
-                st.json(case_assessment)
-            except Exception as exc:
-                st.error(f"Failed to parse JSON: {exc}")
-    else:
-        provider = st.text_input("Airline/Provider", value="Lufthansa")
-        flight_number = st.text_input("Flight Number", value="LH123")
-        flight_date = st.date_input("Flight Date", value=date.today())
-        departure_airport = st.text_input("Departure Airport", value="FRA")
-        arrival_airport = st.text_input("Arrival Airport", value="MAD")
-        arrival_delay_hours = st.number_input("Arrival Delay (hours)", min_value=0.0, max_value=24.0, value=3.5, step=0.5)
-        distance_km = st.number_input("Distance (km, optional)", min_value=0.0, value=1450.0, step=10.0)
-        use_distance = st.checkbox("Include distance", value=True)
-        passenger_name = st.text_input("Passenger Name", value="Jane Doe")
-        passenger_email = st.text_input("Passenger Email", value="jane.doe@example.com")
-        notes = st.text_area("Notes", value="Flight arrived late due to operational issues.")
-        intake_data = {
-            "provider": provider,
-            "flight_number": flight_number,
-            "flight_date": flight_date,
-            "departure_airport": departure_airport,
-            "arrival_airport": arrival_airport,
-            "arrival_delay_hours": arrival_delay_hours,
-            "distance_km": distance_km if use_distance else None,
-            "passenger_name": passenger_name,
-            "passenger_email": passenger_email,
-            "notes": notes,
-        }
-        source_payload = dict(intake_data)
-        case_assessment = assess_case_payload(
-            {
-                "case_type": "flight",
-                **intake_data,
-            }
-        )
+    uploaded = st.file_uploader("Upload intake JSON", type=["json"])
+    if uploaded is not None:
+        try:
+            payload = json.loads(uploaded.getvalue().decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("Root JSON value must be an object")
+            source_payload = dict(payload)
+            intake_data = _parse_intake_json(payload)
+            assessment_payload = dict(payload)
+            assessment_payload.update({k: v for k, v in intake_data.items() if v is not None and str(v).strip()})
+            case_assessment = assess_case_payload(assessment_payload)
+            st.caption("Extracted intake values")
+            st.json(intake_data)
+            st.caption("Detected policy and case requirements")
+            st.json(case_assessment)
+        except Exception as exc:
+            st.error(f"Failed to parse JSON: {exc}")
 
     run_agent = st.button("Run Agent", type="primary")
 
 if run_agent:
-    if intake_mode == "JSON file" and not intake_data:
+    if not intake_data:
         st.error("Upload a valid JSON file first.")
         st.stop()
 
@@ -363,4 +329,4 @@ if plan is not None:
         for t in plan.tool_trace:
             st.code(t)
 else:
-    st.info("Upload JSON or fill manual intake, then click 'Run Agent'.")
+    st.info("Upload intake JSON and click 'Run Agent'.")
