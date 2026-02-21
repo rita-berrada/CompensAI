@@ -225,17 +225,6 @@ class RegulatoryLexicalRetriever:
                     """,
                     (case_type, f"%{query.lower()}%", f"%{query.lower()}%", int(k)),
                 ).fetchall()
-            if not rows:
-                rows = conn.execute(
-                    """
-                    SELECT section_id, doc_name, article_ref, heading, text, 9.0 AS bm25_score
-                    FROM reg_sections
-                    WHERE case_type = ?
-                    ORDER BY rowid
-                    LIMIT ?
-                    """,
-                    (case_type, int(k)),
-                ).fetchall()
 
         for section_id, doc_name, article_ref, heading, text, bm25_score in rows:
             score = 1.0 / (1.0 + abs(float(bm25_score)))
@@ -248,9 +237,6 @@ def infer_article_reference(citation: RagCitation) -> Optional[str]:
     m = re.search(r"\b(Article\s+\d+[a-z]?)\b", citation.title, flags=re.IGNORECASE)
     if m:
         return _normalize(m.group(1)).title()
-    m_text = re.search(r"\b(Article\s+\d+[a-z]?)\b", citation.text, flags=re.IGNORECASE)
-    if m_text:
-        return _normalize(m_text.group(1)).title()
     m2 = re.search(r"\b(Section\s+\d+)\b", citation.title, flags=re.IGNORECASE)
     if m2:
         return _normalize(m2.group(1)).title()

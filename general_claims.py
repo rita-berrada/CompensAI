@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from regulatory_engine import evaluate_case
-from tools import find_claim_channel
 
 
 def _get(payload: Dict[str, Any], *keys: str) -> Any:
@@ -77,8 +76,6 @@ def _build_body(case_type: str, payload: Dict[str, Any], evaluation: Dict[str, A
     details_block = "\n".join(key_pairs) if key_pairs else "- details: provided in original communication"
     hooks = evaluation.get("legal_hooks") or []
     hooks_block = "\n".join([f"- {h}" for h in hooks]) if hooks else "- Applicable legal hooks included in evidence bundle"
-    article_refs = evaluation.get("article_references") or []
-    articles_block = ", ".join([str(a) for a in article_refs]) if article_refs else "No article references retrieved"
 
     return (
         f"Dear {provider} support team,\n\n"
@@ -87,7 +84,6 @@ def _build_body(case_type: str, payload: Dict[str, Any], evaluation: Dict[str, A
         f"Contact: {email}\n\n"
         f"Case details:\n{details_block}\n\n"
         f"Legal hooks considered:\n{hooks_block}\n\n"
-        f"Article references: {articles_block}\n\n"
         f"Assessment summary: {evaluation.get('rationale')}\n"
         f"Requested remedy: {evaluation.get('expected_outcome')}\n\n"
         "Please confirm receipt and provide your formal response within the applicable legal timeline.\n\n"
@@ -101,19 +97,16 @@ def build_general_claim_plan(payload: Dict[str, Any], case_assessment: Dict[str,
     evaluation = evaluate_case(case_type=case_type, payload=payload)
     legal_instrument = str(evaluation.get("legal_basis") or case_assessment.get("legal_instrument") or "Relevant EU framework")
 
-    if case_type == "flight":
-        provider = str(_get(payload, "provider", "carrier", "airline") or "")
-        ch = find_claim_channel(provider)
-        channel = {
-            "channel_type": ch.channel_type,
-            "destination": ch.destination or "provider customer support channel",
+    channel = _default_channel(payload)
+    eligible = bool(evaluation.get("eligible"))
+    draft = (
+        {
+            "subject": _build_subject(case_type, payload),
+            "body": _build_body(case_type, payload, evaluation, legal_instrument),
         }
-    else:
-        channel = _default_channel(payload)
-    draft = {
-        "subject": _build_subject(case_type, payload),
-        "body": _build_body(case_type, payload, evaluation, legal_instrument),
-    }
+        if eligible
+        else None
+    )
 
     filtered_payload = {k: v for k, v in payload.items() if v not in (None, "")}
     return {
@@ -123,6 +116,7 @@ def build_general_claim_plan(payload: Dict[str, Any], case_assessment: Dict[str,
         "legal_hooks": evaluation.get("legal_hooks") or [],
         "article_references": evaluation.get("article_references") or [],
         "citation_requirement_met": bool(evaluation.get("citation_requirement_met")),
+        "draft_generated": eligible,
         "required_fields": case_assessment.get("required_fields") or [],
         "missing_fields": case_assessment.get("missing_fields") or [],
         "eligibility": {

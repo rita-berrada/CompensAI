@@ -5,10 +5,9 @@ Hackathon-ready Streamlit app that ingests complaint JSON, classifies case type 
 ## Features
 
 - Streamlit JSON intake for multi-domain EU claims
-- LLM-first case-type routing (`flight`, `rail`, `bus_coach`, `sea`, `parcel_delivery`, `package_travel`) with deterministic fallback
-- Full-document lexical retrieval (SQLite FTS, no embeddings) from `data/regulations/*.txt`
-- Document-grounded rule evaluation from `data/regulatory_rules.json`
-- Mandatory citation output with article references and citation coverage flag
+- Orchestrator agent with bounded Claude tool-calling loop (Anthropic Messages API)
+- Local RAG over `data/eu261_kb.jsonl` with a persisted SQLite FTS index in `data/eu261_rag.sqlite`
+- Deterministic fallback mode when `ANTHROPIC_API_KEY` is missing
 - Human-in-the-loop approval/edit step before simulated submission
 - Event logging to:
   - `logs/events.jsonl`
@@ -25,10 +24,6 @@ Hackathon-ready Streamlit app that ingests complaint JSON, classifies case type 
 - `/Users/natalia2/hackeurope/compensation-agent/data/providers.json`
 - `/Users/natalia2/hackeurope/compensation-agent/data/eu261_kb.jsonl`
 - `/Users/natalia2/hackeurope/compensation-agent/data/eu261_rag.sqlite` (auto-generated index)
-- `/Users/natalia2/hackeurope/compensation-agent/data/regulations/` (full regulation texts)
-- `/Users/natalia2/hackeurope/compensation-agent/data/regulatory_rules.json`
-- `/Users/natalia2/hackeurope/compensation-agent/regulatory_lexical.py`
-- `/Users/natalia2/hackeurope/compensation-agent/regulatory_engine.py`
 - `/Users/natalia2/hackeurope/compensation-agent/requirements.txt`
 
 ## Setup
@@ -57,10 +52,8 @@ streamlit run app.py
 2. In sidebar, upload a JSON file containing structured fields and/or `email_text`.
 3. Click **Run Agent**.
 4. Review:
-   - Case type + policy match
    - Eligibility + rationale + confidence
-   - Legal hooks + article references
-   - Regulatory citations (chunk id, section title, score)
+   - RAG citations (chunk id, title, similarity score)
    - Selected submission channel
    - Email draft or form payload preview
 5. Edit draft (if email route), click **Approve & Simulate Submission**.
@@ -82,27 +75,4 @@ streamlit run app.py
   - `parcel_delivery` -> Directive 2011/83/EU (delivery/refund timeline)
   - `package_travel` -> Directive (EU) 2015/2302
 - Case routing is LLM-first when `ANTHROPIC_API_KEY` is configured (heuristic fallback otherwise).
-- Eligibility and outcomes are now document-grounded via `data/regulatory_rules.json` + full-doc lexical retrieval over `data/regulations/*.txt` (no embeddings).
-- If lexical retrieval cannot find relevant sections, output confidence is reduced and citation requirement is marked unmet.
-
-## Testing
-
-1. Run automated smoke test:
-
-```bash
-python3 scripts/run_regulatory_smoke_test.py
-```
-
-2. Expected result:
-   - All sample files pass.
-   - `data/test_flight_delay_2h_not_eligible.json` shows `eligible=False`.
-   - Each case shows `citation_requirement_met=True` and article references.
-
-3. Manual UI check:
-   - Run `streamlit run app.py`.
-   - Upload each `data/test_*.json` file.
-   - Verify:
-     - classification block shows case type
-     - policy/eligibility are populated
-     - citation block includes regulation sections
-     - `Citation requirement met` is `Yes`
+- Eligibility and outcomes are now document-grounded via `data/regulatory_rules.json` + `data/regulatory_kb.jsonl`, then used to generate drafts and compliance reasoning with legal hooks/citations.

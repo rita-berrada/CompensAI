@@ -8,10 +8,13 @@ from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 import streamlit as st
+from pydantic import ValidationError
 
+from agent import run_claim_agent
 from db import init_db, log_event
 from general_claims import build_general_claim_plan
 from policy_router import assess_case_payload, classify_case_payload
+from schemas import ClaimIntake
 from tools import load_providers, log_human_review
 
 
@@ -151,9 +154,9 @@ st.title("EU Transport & Delivery Claims Agent")
 st.caption("JSON-first claims agent with case-type routing, regulatory analysis, and human-in-the-loop drafting.")
 
 if os.getenv("ANTHROPIC_API_KEY"):
-    st.success("Mode: LLM-first classification + document-grounded evaluation")
+    st.success("Mode: Claude tool-calling")
 else:
-    st.warning("Mode: Heuristic classification fallback + document-grounded evaluation (no ANTHROPIC_API_KEY)")
+    st.warning("Mode: Deterministic fallback (no ANTHROPIC_API_KEY)")
 
 with st.sidebar:
     st.header("Claim Intake")
@@ -193,15 +196,43 @@ if run_agent:
         st.stop()
 
     claim_id = str(uuid.uuid4())
-    merged_payload = dict(source_payload)
-    merged_payload.update({k: v for k, v in intake_data.items() if v not in (None, "")})
-    general_plan = build_general_claim_plan(merged_payload, case_assessment or {})
-    st.session_state["general_plan"] = general_plan
-    st.session_state["claim_plan"] = None
-    st.session_state["claim_id"] = claim_id
-    log_event(claim_id, "claim_intake", merged_payload)
-    log_event(claim_id, "general_claim_plan", general_plan)
-    st.success(f"Agent completed for claim_id={claim_id}")
+    case_type = (case_assessment or {}).get("case_type", "unknown")
+    if case_type != "flight":
+        merged_payload = dict(source_payload)
+        merged_payload.update({k: v for k, v in intake_data.items() if v not in (None, "")})
+        general_plan = build_general_claim_plan(merged_payload, case_assessment or {})
+        st.session_state["general_plan"] = general_plan
+        st.session_state["claim_plan"] = None
+        st.session_state["claim_id"] = claim_id
+        log_event(claim_id, "claim_intake_non_flight", merged_payload)
+        log_event(claim_id, "general_claim_plan", general_plan)
+        st.success(f"Agent completed for claim_id={claim_id}")
+    else:
+        try:
+            intake = ClaimIntake(
+                claim_id=claim_id,
+                provider=intake_data.get("provider"),
+                flight_number=intake_data.get("flight_number"),
+                flight_date=intake_data.get("flight_date"),
+                departure_airport=intake_data.get("departure_airport"),
+                arrival_airport=intake_data.get("arrival_airport"),
+                arrival_delay_hours=intake_data.get("arrival_delay_hours"),
+                distance_km=intake_data.get("distance_km"),
+                passenger_name=intake_data.get("passenger_name"),
+                passenger_email=intake_data.get("passenger_email"),
+                notes=intake_data.get("notes", ""),
+            )
+        except ValidationError as e:
+            st.error(f"Invalid intake data: {e}")
+            st.stop()
+
+        log_event(claim_id, "claim_intake", intake.model_dump(mode="json"))
+        with st.spinner("Running orchestrator agent..."):
+            plan = run_claim_agent(intake)
+        st.session_state["claim_plan"] = plan
+        st.session_state["general_plan"] = None
+        st.session_state["claim_id"] = claim_id
+        st.success(f"Agent completed for claim_id={claim_id}")
 
 general_plan = st.session_state.get("general_plan")
 if general_plan is not None:
@@ -231,28 +262,27 @@ if general_plan is not None:
     st.write(f"**Channel:** {channel.get('channel_type', 'unknown')}")
     st.write(f"**Destination:** {channel.get('destination', 'N/A')}")
 
-    draft = general_plan.get("draft") or {}
-    st.subheader("Draft Claim (Human-in-the-loop)")
-    edited_subject = st.text_input("Subject", value=draft.get("subject", ""))
-    edited_body = st.text_area("Body", value=draft.get("body", ""), height=280)
-    if st.button("Approve & Simulate Submission", key="approve_non_flight"):
-        claim_id = st.session_state.get("claim_id", str(uuid.uuid4()))
-        log_human_review(claim_id, True, edited_subject, edited_body)
-        log_event(
-            claim_id,
-            "submission_simulated",
-            {"channel": channel.get("channel_type"), "destination": channel.get("destination"), "subject": edited_subject},
-        )
-        st.success("Approved and simulated submission logged.")
+    if eligibility.get("eligible") and general_plan.get("draft"):
+        draft = general_plan.get("draft") or {}
+        st.subheader("Draft Claim (Human-in-the-loop)")
+        edited_subject = st.text_input("Subject", value=draft.get("subject", ""))
+        edited_body = st.text_area("Body", value=draft.get("body", ""), height=280)
+        if st.button("Approve & Simulate Submission", key="approve_non_flight"):
+            claim_id = st.session_state.get("claim_id", str(uuid.uuid4()))
+            log_human_review(claim_id, True, edited_subject, edited_body)
+            log_event(
+                claim_id,
+                "submission_simulated",
+                {"channel": channel.get("channel_type"), "destination": channel.get("destination"), "subject": edited_subject},
+            )
+            st.success("Approved and simulated submission logged.")
+    else:
+        st.info("Eligibility is No. Draft Email is not generated.")
 
     if channel.get("channel_type") == "form":
         st.subheader("Form Payload Preview")
         form_preview = general_plan.get("form_payload_preview", {}).get("fields", {})
         st.json(form_preview)
-
-    st.write(f"**Citation requirement met:** {'Yes' if general_plan.get('citation_requirement_met') else 'No'}")
-    if general_plan.get("article_references"):
-        st.write(f"**Article references:** {', '.join(general_plan.get('article_references') or [])}")
 
     citations = general_plan.get("citations") or []
     if citations:
@@ -260,5 +290,68 @@ if general_plan is not None:
         for cite in citations:
             st.write(f"- {cite.get('chunk_id')} | {cite.get('title')} | score={float(cite.get('score', 0.0)):.3f}")
             st.caption(str(cite.get("text", "")))
+
+plan = st.session_state.get("claim_plan")
+if plan is not None:
+    st.subheader("Eligibility")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Eligible", "Yes" if plan.eligibility.eligible else "No")
+    c2.metric("Compensation (EUR)", plan.eligibility.compensation_eur if plan.eligibility.compensation_eur else "N/A")
+    c3.metric("Confidence", f"{plan.eligibility.confidence:.2f}")
+    st.write(f"**Legal basis:** {plan.eligibility.legal_basis}")
+    st.write(f"**Rationale:** {plan.eligibility.rationale}")
+    if plan.eligibility.missing_info:
+        st.write(f"**Missing info:** {', '.join(plan.eligibility.missing_info)}")
+
+    st.subheader("RAG Citations")
+    if plan.rag_citations:
+        for cite in plan.rag_citations:
+            with st.expander(f"{cite.chunk_id} | {cite.title} | score={cite.score:.3f}"):
+                st.write(cite.text)
+    else:
+        st.info("No citations found.")
+
+    st.subheader("Submission Channel")
+    st.write(f"**Provider:** {plan.channel.provider}")
+    st.write(f"**Channel:** {plan.channel.channel_type}")
+    if plan.channel.destination:
+        st.write(f"**Destination:** {plan.channel.destination}")
+    if plan.channel.required_fields:
+        st.write(f"**Required fields:** {', '.join(plan.channel.required_fields)}")
+    if plan.channel.notes:
+        st.write(f"**Notes:** {plan.channel.notes}")
+
+    claim_id = st.session_state.get("claim_id", plan.intake.claim_id)
+    if plan.channel.channel_type == "email" and plan.draft and plan.eligibility.eligible:
+        st.subheader("Draft Email (Human-in-the-loop)")
+        edited_subject = st.text_input("Subject", value=plan.draft.subject)
+        edited_body = st.text_area("Body", value=plan.draft.body, height=280)
+        if st.button("Approve & Simulate Submission"):
+            log_human_review(claim_id, True, edited_subject, edited_body)
+            log_event(
+                claim_id,
+                "submission_simulated",
+                {"channel": "email", "destination": plan.channel.destination, "subject": edited_subject},
+            )
+            st.success("Approved and simulated email submission logged.")
+    elif plan.channel.channel_type == "email" and not plan.eligibility.eligible:
+        st.info("Eligibility is No. Draft Email is not generated.")
+    elif plan.channel.channel_type == "form" and plan.form_payload_preview:
+        st.subheader("Form Payload Preview")
+        st.json(plan.form_payload_preview.fields)
+        if st.button("Approve & Simulate Submission"):
+            log_human_review(claim_id, True, "(form submission)", str(plan.form_payload_preview.fields))
+            log_event(
+                claim_id,
+                "submission_simulated",
+                {"channel": "form", "destination": plan.channel.destination, "payload": plan.form_payload_preview.fields},
+            )
+            st.success("Approved and simulated form submission logged.")
+    else:
+        st.info("Unknown provider channel. Add it in data/providers.json.")
+
+    with st.expander("Tool Trace"):
+        for t in plan.tool_trace:
+            st.code(t)
 else:
     st.info("Upload intake JSON and click 'Run Agent'.")

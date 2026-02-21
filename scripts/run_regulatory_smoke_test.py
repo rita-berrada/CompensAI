@@ -12,19 +12,19 @@ from general_claims import build_general_claim_plan
 from policy_router import assess_case_payload, classify_case_payload
 
 CASES = [
-    ("data/test_flight_delay_2h_not_eligible.json", "flight", False),
-    ("data/test_rail_delay.json", "rail", True),
-    ("data/test_bus_cancellation.json", "bus_coach", True),
-    ("data/test_ferry_delay.json", "sea", True),
-    ("data/test_parcel_not_delivered.json", "parcel_delivery", True),
-    ("data/test_package_travel_cancelled.json", "package_travel", True),
+    ("data/test_flight_delay_2h_not_eligible.json", "flight", False, False),
+    ("data/test_rail_delay.json", "rail", True, True),
+    ("data/test_bus_cancellation.json", "bus_coach", True, True),
+    ("data/test_ferry_delay.json", "sea", True, True),
+    ("data/test_parcel_not_delivered.json", "parcel_delivery", True, True),
+    ("data/test_package_travel_cancelled.json", "package_travel", True, True),
 ]
 
 
 def main() -> int:
     failures = []
     print("== Regulatory Smoke Test ==")
-    for rel_path, expected_case, expected_eligible in CASES:
+    for rel_path, expected_case, expected_eligible, expected_draft in CASES:
         path = ROOT / rel_path
         payload = json.loads(path.read_text(encoding="utf-8"))
         cls = classify_case_payload(payload)
@@ -33,15 +33,22 @@ def main() -> int:
 
         got_case = plan.get("case_type")
         got_eligible = bool((plan.get("eligibility") or {}).get("eligible"))
+        got_draft = bool(plan.get("draft"))
         citation_ok = bool(plan.get("citation_requirement_met"))
         article_refs = plan.get("article_references") or []
 
-        ok = got_case == expected_case and got_eligible == expected_eligible and citation_ok
+        ok = (
+            got_case == expected_case
+            and got_eligible == expected_eligible
+            and got_draft == expected_draft
+            and citation_ok
+        )
         status = "PASS" if ok else "FAIL"
 
         print(f"[{status}] {rel_path}")
         print(f"  classified_case={got_case} expected_case={expected_case}")
         print(f"  eligible={got_eligible} expected_eligible={expected_eligible}")
+        print(f"  draft_generated={got_draft} expected_draft_generated={expected_draft}")
         print(f"  citation_requirement_met={citation_ok}")
         print(f"  article_references={article_refs}")
 
