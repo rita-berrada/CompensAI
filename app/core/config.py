@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - runtime fallback for limited envs
+    def load_dotenv(*_: object, **__: object) -> bool:
+        return False
 
 
 def _split_csv(value: str | None) -> list[str]:

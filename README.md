@@ -167,6 +167,31 @@ Expected behavior:
 - Timeline rows appear in `public.case_events` (`email_scanned`, `draft_generated`, `awaiting_approval`).
 - If Claude is unavailable, the case is still processed via deterministic fallback and saved.
 
+## Terms/Conditions confirmation agent
+Use this runner to scan table `terms_cond`, check field `terms_cond=true`, and send:
+
+`Thank you for accepting terms and conditions`
+
+Run once:
+
+```bash
+python3 terms_cond_agent.py
+```
+
+Run continuously (polling):
+
+```bash
+python3 terms_cond_agent.py --poll --interval 30
+```
+
+Behavior:
+- Reads rows from `TERMS_COND_TABLE` where `TERMS_COND_FIELD=TRUE`
+- Sends to `TERMS_COND_TO_EMAIL` (default: `client.compensai@gmail.com`)
+- If `TERMS_COND_TO_EMAIL` is empty, uses recipient columns from `TERMS_COND_RECIPIENT_FIELDS` (default: `user_email,email,to_email`)
+- Sends via `TERMS_COND_SEND_WEBHOOK_URL` (or `AGENT1_SEND_WEBHOOK_URL` fallback)
+- If no webhook is set, falls back to SMTP settings
+- If mark-sent columns exist, updates them to avoid duplicates
+
 ## Supabase verification SQL
 Use Supabase SQL editor:
 
