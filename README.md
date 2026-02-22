@@ -1,3 +1,6 @@
+## Devpost
+https://devpost.com/software/compensai-choakb
+
 # CompensAI Backend (FastAPI + Supabase)
 
 Hackathon backend scaffolding for a 3‑agent compensation pipeline:
@@ -202,3 +205,10 @@ from public.case_events
 order by created_at desc
 limit 20;
 ```
+# Other parts of the project
+
+## Lovable UI
+https://github.com/yauhenifutryn/dispute-defender-dash
+
+## Demo websites for the company (airline and marketplace)
+https://skill-deploy-x4cr0r1eo8-codex-agent-deploys.vercel.app/index.html airline and amazon demo webstes
