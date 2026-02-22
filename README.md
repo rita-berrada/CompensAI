@@ -183,3 +183,25 @@ from public.case_events
 order by created_at desc
 limit 20;
 ```
+
+## Agent 3 LangGraph node (Stripe invoice + Supabase UI trigger)
+File: `app/services/agent3.py`
+
+`run_agent3(state)` expects:
+- `dispute_id`
+- `user_email`
+- `recovered_amount_eur`
+
+Write path:
+- Creates a Stripe customer from `user_email`
+- Creates invoice item for `10%` success fee (amount in EUR cents)
+- Creates/sends invoice (`collection_method=send_invoice`, `days_until_due=7`)
+- Reads `hosted_invoice_url`
+- Updates Supabase `disputes` row by `id`:
+  - `status = "RESOLVED_SUCCESS"`
+  - `draft_payload_json["stripe_invoice_url"] = hosted_invoice_url`
+
+Required env vars:
+- `STRIPE_SECRET_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
