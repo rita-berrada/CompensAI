@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.core.security import require_n8n_secret
 from app.db.supabase import SupabaseError, get_supabase
-from app.repositories.cases import find_case_by_message_id, insert_case, insert_event, update_case
+from app.repositories.cases import delete_case, find_case_by_message_id, insert_case, insert_event, update_case
 from app.routers.cases import CaseIntakeRequest
 from app.services.agent2 import process_case
 from app.services.triage import triage_email
@@ -68,9 +68,34 @@ def ingest_email(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secre
             extracted_fields=extracted_fields,
         )
         triage_output = dict(triage_result.output or {})
-        decision = str(triage_output.get("decision") or "candidate")
+        decision = str(triage_output.get("decision") or "trash")  # Default to trash, not candidate
         if decision not in {"trash", "candidate"}:
-            decision = "candidate"
+            decision = "trash"  # If invalid, default to trash
+
+        # Additional validation: even if marked as candidate, verify it has claim indicators
+        if decision == "candidate":
+            combined_text = f"{subject}\n{body_text}".lower()
+            # Must have at least one clear claim indicator
+            claim_indicators = [
+                "flight", "delayed", "delay", "cancelled", "canceled", "cancellation",
+                "denied boarding", "overbook", "baggage", "luggage",
+                "delivery", "parcel", "tracking", "order", "missing", "damaged",
+                "refund", "compensation", "claim", "reimburse", "chargeback",
+                "complaint", "disruption", "booking", "ticket", "reservation",
+                "train", "rail", "eu261"
+            ]
+            has_claim_indicator = any(indicator in combined_text for indicator in claim_indicators)
+            
+            # Check confidence - if low confidence candidate, be more strict
+            confidence = triage_output.get("confidence", 0.0)
+            if not has_claim_indicator or confidence < 0.7:
+                # Reject as trash if no clear indicators or low confidence
+                decision = "trash"
+                triage_output["decision"] = "trash"
+                triage_output["reasons"] = triage_output.get("reasons", []) + [
+                    "Post-validation: No clear claim indicators found" if not has_claim_indicator 
+                    else f"Post-validation: Low confidence ({confidence}) candidate rejected"
+                ]
 
         if decision == "trash":
             return EmailIngestResponse(accepted=False, decision="trash", triage=triage_output, existing=False)
@@ -123,6 +148,19 @@ def ingest_email(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secre
         for event_type, details in agent2_result.events:
             insert_event(db, case_id=created["id"], actor="agent2", event_type=event_type, details=details)
 
+        # If category is "unknown", delete the case so it doesn't appear on dashboard
+        if updated.get("category") == "unknown":
+            delete_case(db, created["id"])
+            # Return a response indicating the case was deleted (but still accepted for processing)
+            return EmailIngestResponse(
+                accepted=True,
+                decision="candidate",
+                triage=triage_output,
+                existing=False,
+                case_id=created["id"],
+                status="deleted",
+            )
+
         return EmailIngestResponse(
             accepted=True,
             decision="candidate",
@@ -133,3 +171,12 @@ def ingest_email(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secre
         )
     except SupabaseError as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
+    except Exception as exc:  # noqa: BLE001
+        # Catch any unexpected errors to prevent 500/502
+        import traceback
+        error_details = {
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "traceback": traceback.format_exc(),
+        }
+        raise HTTPException(status_code=500, detail=error_details) from exc

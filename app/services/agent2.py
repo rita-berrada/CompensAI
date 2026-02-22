@@ -575,6 +575,8 @@ def _draft_email(
     flight_number: str | None,
     booking_reference: str | None,
     estimated_value: Decimal | None,
+    form_url: str | None = None,
+    original_email_body: str | None = None,
 ) -> tuple[str, str]:
     vendor_name = vendor or "Customer Support"
     incident_str = incident_date.isoformat() if incident_date else "[INCIDENT_DATE]"
@@ -582,22 +584,85 @@ def _draft_email(
     booking_str = booking_reference or "[BOOKING_REFERENCE]"
     amount_str = f"{estimated_value} EUR" if estimated_value is not None else "[AMOUNT]"
 
-    subject = f"EU261 Compensation Claim - {flight_str} on {incident_str}"
-    body = (
-        f"Hello {vendor_name},\n\n"
-        f"I am writing to request compensation under EU Regulation 261/2004 for {category or 'a disruption'}.\n\n"
-        f"Details:\n"
-        f"- Flight: {flight_str}\n"
-        f"- Booking reference: {booking_str}\n"
-        f"- Date of incident: {incident_str}\n\n"
-        f"Based on the available facts, I believe compensation of approximately {amount_str} may apply.\n"
-        f"Please confirm receipt of this claim and share next steps.\n\n"
-        f"Kind regards,\n"
-        f"[YOUR_NAME]\n"
-        f"[PHONE]\n"
-        f"[ADDRESS]\n"
-    )
+    # Check if form format is needed (airline-claim.html)
+    is_form_format = form_url and "airline-claim.html" in form_url
+
+    if is_form_format:
+        # Generate structured form format
+        # Extract complaint summary from original email body
+        complaint_summary = _extract_complaint_summary(original_email_body or "", flight_number, booking_reference)
+        
+        subject = f"Compensation Claim Form - {flight_str}"
+        body = (
+            f"Booking Reference: {booking_str}\n"
+            f"Flight Number: {flight_str}\n"
+            f"Complaint Summary: {complaint_summary}"
+        )
+    else:
+        # Generate regular email format
+        subject = f"EU261 Compensation Claim - {flight_str} on {incident_str}"
+        body = (
+            f"Hello {vendor_name},\n\n"
+            f"I am writing to request compensation under EU Regulation 261/2004 for {category or 'a disruption'}.\n\n"
+            f"Details:\n"
+            f"- Flight: {flight_str}\n"
+            f"- Booking reference: {booking_str}\n"
+            f"- Date of incident: {incident_str}\n\n"
+            f"Based on the available facts, I believe compensation of approximately {amount_str} may apply.\n"
+            f"Please confirm receipt of this claim and share next steps.\n\n"
+            f"Kind regards,\n"
+            f"[YOUR_NAME]\n"
+            f"[PHONE]\n"
+            f"[ADDRESS]\n"
+        )
     return subject, body
+
+
+def _extract_complaint_summary(email_body: str, flight_number: str | None, booking_reference: str | None) -> str:
+    """
+    Extract a simple complaint summary from the original email body.
+    Returns a concise summary of the flight disruption.
+    """
+    if not email_body or not email_body.strip():
+        return "Flight disruption requiring compensation under EU Regulation 261/2004."
+    
+    # Remove URLs and signatures
+    import re
+    cleaned = re.sub(r"https?://[^\s]+", "", email_body)
+    cleaned = re.sub(r"(?i)(best regards|sincerely|kind regards|regards)[^.]*$", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"(?i)(customer support|customer service)[^.]*$", "", cleaned, flags=re.MULTILINE)
+    
+    # Find sentences about delay/cancellation/disruption
+    sentences = re.split(r"[.!?]\s+", cleaned)
+    relevant = []
+    
+    keywords = ["delay", "delayed", "cancelled", "canceled", "disruption", "disrupted", "technical", "maintenance"]
+    
+    for sentence in sentences:
+        sentence_lower = sentence.lower().strip()
+        if any(keyword in sentence_lower for keyword in keywords):
+            # Skip policy/contact references
+            if not any(skip in sentence_lower for skip in ["policy", "contact", "visit", "website", "form"]):
+                relevant.append(sentence.strip())
+                if len(relevant) >= 2:  # Take first 2 relevant sentences
+                    break
+    
+    if relevant:
+        summary = ". ".join(relevant)
+        if not summary.endswith((".", "!", "?")):
+            summary += "."
+        return summary
+    
+    # Fallback: use first paragraph
+    paragraphs = cleaned.split("\n\n")
+    if paragraphs:
+        first_para = paragraphs[0].strip()
+        # Limit length
+        if len(first_para) > 300:
+            first_para = first_para[:300] + "..."
+        return first_para
+    
+    return "Flight disruption requiring compensation under EU Regulation 261/2004."
 
 
 def _draft_delivery_email(
@@ -724,6 +789,12 @@ def _deterministic_fallback(
             estimated_value=estimated_value,
         )
     else:
+        # Get form_url before calling _draft_email
+        form_url = None
+        urls = (company_site or {}).get("urls")
+        if isinstance(urls, dict):
+            form_url = _clean_str(urls.get("claim_form_url"))
+        
         draft_subject, draft_body = _draft_email(
             vendor=inferred_vendor,
             category=inferred_category,
@@ -731,6 +802,8 @@ def _deterministic_fallback(
             flight_number=flight_number,
             booking_reference=booking_reference,
             estimated_value=estimated_value,
+            form_url=form_url,
+            original_email_body=body,
         )
     preview = draft_body[:220]
 
@@ -738,10 +811,12 @@ def _deterministic_fallback(
     if domain == "marketplace" and not contact_email:
         contact_email = _clean_str(case.get("from_email"))
     form_schema = (company_site or {}).get("form_schema")
-    form_url = None
-    urls = (company_site or {}).get("urls")
-    if isinstance(urls, dict):
-        form_url = _clean_str(urls.get("claim_form_url"))
+    # form_url already extracted above for flights domain
+    if domain != "flights":
+        form_url = None
+        urls = (company_site or {}).get("urls")
+        if isinstance(urls, dict):
+            form_url = _clean_str(urls.get("claim_form_url"))
 
     return {
         "extraction": {

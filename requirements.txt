@@ -3,5 +3,5 @@ uvicorn[standard]>=0.27
 httpx>=0.25
 python-dotenv>=1.0
 pydantic>=2.6
-stripe>=8.0
 anthropic>=0.40
+reportlab>=4.0

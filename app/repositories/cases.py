@@ -89,3 +89,27 @@ def insert_event(
         "details": details or {},
     }
     return db.insert("case_events", payload)
+
+
+def delete_case(db: SupabaseRESTClient, case_id: str) -> None:
+    """Delete a case and all its associated events from Supabase."""
+    # Delete case events first (foreign key constraint)
+    db.delete("case_events", filters={"case_id": f"eq.{case_id}"})
+    # Delete the case
+    db.delete("cases", filters={"id": f"eq.{case_id}"})
+
+
+def get_pending_drafts(db: SupabaseRESTClient, limit: int = 100) -> list[dict[str, Any]]:
+    """Get cases with drafts ready to send (awaiting_approval status)."""
+    rows = db.select(
+        "cases",
+        filters={"status": "eq.awaiting_approval"},
+        columns="id,from_email,to_email,email_body,draft_email_subject,draft_email_body,form_data,thread_id,message_id,vendor,category,flight_number,booking_reference",
+        limit=limit,
+        order="updated_at.desc",  # Most recent first
+    )
+    # Filter to only include cases that have both subject and body
+    return [
+        row for row in rows
+        if row.get("draft_email_subject") and row.get("draft_email_body")
+    ]

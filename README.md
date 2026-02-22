@@ -1,204 +1,143 @@
-# CompensAI Backend (FastAPI + Supabase)
+# CompensAI Backend
 
-Hackathon backend scaffolding for a 3‑agent compensation pipeline:
-- **Agent 1 (n8n + Gmail):** scans inbox → extracts “intake” JSON → calls backend.
-- **Agent 2 (FastAPI):** eligibility + draft generation → writes to Supabase.
-- **Agent 3 (FastAPI, mandatory):** billing artifacts after resolution (event + optional Stripe link).
-- **UI (Lovable):** reads from Supabase directly (realtime) and calls backend only for approval/reprocess.
+FastAPI backend for an AI-powered compensation claims processing system. Automatically processes emails, extracts claim information, and calculates fees.
 
-Supabase (`public.cases`, `public.case_events`) is the shared state + event log; the backend is an orchestrator/writer.
+## Features
 
-## Architecture recommendation
-- **Communication:** HTTP webhooks between n8n and FastAPI; Supabase is the source of truth.
-- **State:** one row per case in `public.cases` (current snapshot), append‑only timeline in `public.case_events`.
-- **Realtime UI:** Lovable subscribes to `cases` and `case_events` changes (Supabase realtime) to update dashboards + timelines.
-- **Agent 2 logic:** Claude-first extraction/decision with deterministic fallback; supports flights + marketplace + trains and can fetch demo policy/form/contact pages (no Playwright submission in V1).
+- **Email Triage**: Automatically filters compensation-related emails from spam
+- **Claim Processing**: Extracts flight details, booking references, and incident information
+- **Eligibility Assessment**: Evaluates claims against EU261 regulations
+- **Draft Generation**: Creates email drafts or PDF forms for claim submission
+- **Billing**: Calculates 10% success fee on recovered amounts
 
-## Endpoints (implemented)
-Base URL: `http://localhost:8000`
+## Architecture
 
-### `POST /emails/ingest` (Agent 1 → Backend, triage-first)
-Use this endpoint if n8n is sending *all* emails and you want the backend to decide **trash vs candidate**.
-Only candidates create a case and trigger Agent2.
+- **Agent 1 (n8n)**: Scans Gmail inbox and sends emails to backend
+- **Agent 2 (FastAPI)**: Processes cases, extracts data, generates drafts
+- **Agent 3 (FastAPI)**: Handles billing when cases are resolved
+- **Supabase**: Database for cases and events
+- **Claude (Anthropic)**: AI model for email triage and claim processing
 
-### `POST /cases/intake` (Agent 1 → Backend)
-Optional auth header (recommended for server‑to‑server): `X-CompensAI-Webhook-Secret`
+## Setup
 
-Request JSON:
-```json
-{
-  "source": "gmail",
-  "message_id": "18c4...",
-  "thread_id": "18c4...",
-  "from_email": "support@vendor.com",
-  "to_email": "you@gmail.com",
-  "email_subject": "Your flight was delayed",
-  "email_body": "…full text…",
-  "vendor": "Ryanair",
-  "category": "flight_delay",
-  "incident_date": "2025-01-14",
-  "flight_number": "FR123",
-  "booking_reference": "ABCDEF",
-  "estimated_value": 250,
-  "extracted_fields": { "delay_hours": 4 }
-}
-```
+### 1. Install Dependencies
 
-Response JSON:
-```json
-{
-  "id": "case-uuid",
-  "status": "awaiting_approval",
-  "existing": false,
-  "case": { "...full cases row..." }
-}
-```
-
-Writes:
-- `cases`: inserts baseline email context + sets `status=processing`, then runs Agent 2 and updates fields.
-- `case_events`: `email_scanned` (agent1), then `draft_generated` + `awaiting_approval` (agent2).
-
-### `POST /cases/{id}/approve` (UI → Backend → Agent 1)
-Optional auth header: `X-CompensAI-Admin-Key` (not safe for browser apps; hackathon-only)
-
-Request JSON:
-```json
-{ "approved_by": "rita", "notes": "ok to send", "send_via": "email", "dry_run": false }
-```
-
-Behavior:
-- Calls `AGENT1_SEND_WEBHOOK_URL` (n8n) with the draft email/form payload (unless `dry_run=true`).
-- Updates `cases.status=submitted_to_vendor`
-- Inserts `case_events.submitted_to_vendor`
-
-### `POST /cases/{id}/vendor_response` (Agent 1 → Backend)
-Optional auth header (recommended): `X-CompensAI-Webhook-Secret`
-
-Request JSON:
-```json
-{
-  "outcome": "accepted",
-  "resolved": true,
-  "recovered_amount": 250,
-  "currency": "eur",
-  "evidence": { "vendor_ref": "XYZ" },
-  "message_id": "18c4...",
-  "thread_id": "18c4..."
-}
-```
-
-Behavior:
-- Updates `cases.status` and stores vendor response under `cases.decision_json.vendor_response`
-- Inserts `case_events.vendor_replied`
-- If resolved → runs Agent 3 billing and inserts `case_events.resolved` + `case_events.billing_created`
-
-### `POST /cases/{id}/run_agent2` (optional manual reprocess)
-Optional auth header: `X-CompensAI-Admin-Key`
-
-Behavior: re-runs Agent 2 on the current `cases` row and appends events.
-
-## DB fields UI can rely on
-- **Case list:** `id, vendor, category, estimated_value, status, updated_at`
-- **Case detail:** `email_subject, email_body, from_email, to_email, decision_json, draft_email_* , form_data`
-- **Timeline:** `case_events` ordered by `created_at`
-- **Economics (hackathon):**
-  - On resolution, we reuse `cases.estimated_value` as the known recovered amount (if provided).
-  - Canonical billing payload is stored in `cases.decision_json.billing` and the `billing_created` event `details`.
-
-## Minimal folder structure
-```text
-app/
-  main.py
-  core/
-    config.py
-    security.py
-  db/
-    supabase.py
-  repositories/
-    cases.py
-  routers/
-    cases.py
-  services/
-    agent2.py
-    billing.py
-requirements.txt
-.env.example
-```
-
-## Local run
 ```bash
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
+```
+
+### 2. Environment Variables
+
+Create a `.env` file with:
+
+```bash
+# Required
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+ANTHROPIC_API_KEY=your-anthropic-key
+
+# Optional
+N8N_WEBHOOK_SECRET=hackai
+ADMIN_API_KEY=admin
+SUCCESS_FEE_RATE=0.1
+CORS_ORIGINS=http://localhost:3000
+```
+
+### 3. Run the Server
+
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Env vars (minimum)
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY` (server-side only)
+The API will be available at `http://localhost:8000`
 
-Optional:
-- `N8N_WEBHOOK_SECRET` (enables `X-CompensAI-Webhook-Secret` checks)
-- `AGENT1_SEND_WEBHOOK_URL` (approve → n8n send webhook)
-- `ANTHROPIC_API_KEY` (Claude for Agent 2)
-- `ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`)
-- `ANTHROPIC_TIMEOUT_SECONDS` (default `30`)
-- `STRIPE_SECRET_KEY`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`
-- `SUCCESS_FEE_RATE` (default `0.2`)
-- `CORS_ORIGINS` (comma-separated)
+## API Endpoints
 
-## Quick test with Ryanair delay mock
-Run backend first, then post the example payload:
+### Email Ingestion
+
+**POST `/emails/ingest`**
+- Triage endpoint: receives all emails from n8n
+- Filters spam and creates cases for candidates
+- Headers: `X-CompensAI-Webhook-Secret: <secret>`
+
+### Case Management
+
+**POST `/cases/intake`**
+- Direct case creation endpoint
+- Headers: `X-CompensAI-Webhook-Secret: <secret>`
+
+**POST `/cases/{case_id}/approve`**
+- Approve a draft email
+- Headers: `X-CompensAI-Admin-Key: <admin-key>`
+
+**POST `/cases/{case_id}/vendor_response`**
+- Record vendor response and resolve case
+- Triggers billing calculation (10% fee)
+- Headers: `X-CompensAI-Webhook-Secret: <secret>`
+
+**GET `/cases/email-drafts/pending`**
+- Get all approved drafts ready to send
+- Headers: `X-CompensAI-Webhook-Secret: <secret>`
+
+**GET `/cases/{case_id}`**
+- Get a single case by ID
+- Headers: `X-CompensAI-Admin-Key: <admin-key>`
+
+## Testing
+
+Run the complete workflow test:
 
 ```bash
-curl -X POST http://localhost:8000/cases/intake \
-  -H "Content-Type: application/json" \
-  --data @examples/intake_ryanair_delay.json
+./test_full_workflow.sh
 ```
 
-If `N8N_WEBHOOK_SECRET` is configured, also include:
+This will:
+1. Create a test case from an email
+2. Wait for Agent 2 to process it
+3. Resolve the case with €250 recovered
+4. Show results: €250 recovered → €25 fee (10%)
 
-```bash
-curl -X POST http://localhost:8000/cases/intake \
-  -H "Content-Type: application/json" \
-  -H "X-CompensAI-Webhook-Secret: <your-secret>" \
-  --data @examples/intake_ryanair_delay.json
+## Database Schema
+
+### `cases` Table
+- `id`: UUID
+- `status`: processing | awaiting_approval | submitted_to_vendor | resolved
+- `vendor`: Airline/vendor name
+- `category`: flight_delay | flight_cancellation | etc.
+- `recovered_amount`: Amount recovered (EUR)
+- `fee_amount`: Success fee (10% of recovered)
+- `email_subject`, `email_body`: Original email content
+- `draft_email_subject`, `draft_email_body`: Generated drafts
+- `decision_json`: Full processing details (JSONB)
+
+### `case_events` Table
+- Event log for each case
+- Tracks: email_scanned, agent2_processed, approved, vendor_replied, resolved, billing_created
+
+## Project Structure
+
+```
+app/
+  main.py              # FastAPI application
+  routers/
+    cases.py          # Case management endpoints
+    emails.py         # Email ingestion endpoint
+  services/
+    triage.py         # Email triage logic
+    agent2.py         # Claim processing
+    billing.py        # Fee calculation
+    claude_client.py  # Anthropic API client
+  repositories/
+    cases.py          # Database operations
+  db/
+    supabase.py       # Supabase client
+  core/
+    config.py         # Settings
+    security.py       # Auth middleware
 ```
 
-Expected behavior:
-- A new row appears in `public.cases` with extraction, eligibility, draft, and form fields populated.
-- Timeline rows appear in `public.case_events` (`email_scanned`, `draft_generated`, `awaiting_approval`).
-- If Claude is unavailable, the case is still processed via deterministic fallback and saved.
+## License
 
-## Quick tests (other domains)
-Airline cancellation (includes demo airline URLs in body):
-```bash
-curl -X POST http://localhost:8000/cases/intake \
-  -H "Content-Type: application/json" \
-  --data @examples/intake_flight_cancellation.json
-```
-
-Marketplace late delivery (vendor forced to `DemoRetail`; includes demo retail policy/contact URLs in body):
-```bash
-curl -X POST http://localhost:8000/cases/intake \
-  -H "Content-Type: application/json" \
-  --data @examples/intake_delivery_late.json
-```
-
-## Supabase verification SQL
-Use Supabase SQL editor:
-
-```sql
-select id, vendor, category, eligibility_result, estimated_value, status, updated_at
-from public.cases
-order by updated_at desc
-limit 10;
-```
-
-```sql
-select case_id, actor, event_type, details, created_at
-from public.case_events
-order by created_at desc
-limit 20;
-```
+MIT

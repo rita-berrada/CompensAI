@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import re
 from decimal import Decimal
+from io import BytesIO
 from typing import Any, Literal
 from uuid import UUID
 
@@ -9,13 +12,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from pydantic.aliases import AliasChoices
 from pydantic.config import ConfigDict
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from app.core.config import settings
 from app.core.security import require_admin_key, require_n8n_secret
 from app.db.supabase import SupabaseError, get_supabase
 from app.repositories.cases import (
+    delete_case,
     find_case_by_message_id,
     get_case,
+    get_pending_drafts,
     insert_case,
     insert_event,
     update_case,
@@ -147,6 +157,124 @@ class CaseIntakeResponse(BaseModel):
     existing: bool = False
 
 
+def _generate_form_pdf(draft_body: str, vendor: str | None = None) -> bytes:
+    """
+    Generate a PDF form from structured draft body text.
+    Parses the format: "Booking Reference: ...\nFlight Number: ...\nComplaint Summary: ..."
+    Returns PDF as bytes.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    story = []
+    
+    # Define styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        textColor=colors.HexColor('#1a1a1a'),
+        spaceAfter=30,
+    )
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=14,
+        textColor=colors.HexColor('#333333'),
+        spaceAfter=12,
+        spaceBefore=20,
+    )
+    field_style = ParagraphStyle(
+        'CustomField',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=colors.HexColor('#000000'),
+        spaceAfter=8,
+        leftIndent=20,
+    )
+    value_style = ParagraphStyle(
+        'CustomValue',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=colors.HexColor('#000000'),
+        spaceAfter=15,
+        leftIndent=40,
+        fontName='Helvetica-Bold',
+    )
+    
+    # Title
+    title = "Compensation Claim Form"
+    if vendor:
+        title += f" - {vendor}"
+    story.append(Paragraph(title, title_style))
+    story.append(Spacer(1, 0.3 * inch))
+    
+    # Parse structured text format
+    booking_ref = ""
+    flight_number = ""
+    complaint_summary = ""
+    
+    lines = draft_body.split("\n")
+    for line in lines:
+        line = line.strip()
+        if line.startswith("Booking Reference:"):
+            booking_ref = line.replace("Booking Reference:", "").strip()
+        elif line.startswith("Flight Number:"):
+            flight_number = line.replace("Flight Number:", "").strip()
+        elif line.startswith("Complaint Summary:"):
+            # Get everything after "Complaint Summary:"
+            complaint_summary = line.replace("Complaint Summary:", "").strip()
+            # Check if there are more lines for the summary
+            idx = lines.index(line) if line in lines else -1
+            if idx >= 0 and idx + 1 < len(lines):
+                # Collect remaining lines as part of summary
+                remaining = "\n".join(lines[idx + 1:]).strip()
+                if remaining:
+                    complaint_summary = complaint_summary + "\n" + remaining if complaint_summary else remaining
+    
+    # Booking Reference
+    if booking_ref:
+        story.append(Paragraph("<b>Booking Reference:</b>", heading_style))
+        story.append(Paragraph(booking_ref, value_style))
+    
+    # Flight Number
+    if flight_number:
+        story.append(Paragraph("<b>Flight Number:</b>", heading_style))
+        story.append(Paragraph(flight_number, value_style))
+    
+    # Complaint Summary
+    if complaint_summary:
+        story.append(Paragraph("<b>Complaint Summary:</b>", heading_style))
+        # Split into paragraphs for better formatting
+        summary_paragraphs = complaint_summary.split("\n\n")
+        for para in summary_paragraphs:
+            if para.strip():
+                # Escape HTML and wrap text
+                para_escaped = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                story.append(Paragraph(para_escaped, field_style))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.read()
+
+
+class PendingDraftResponse(BaseModel):
+    id: str
+    to: str
+    subject: str
+    body_text: str
+    form_data: dict[str, Any] | None = None
+    thread_id: str | None = None
+    message_id: str | None = None
+    case_id: str
+    vendor: str | None = None
+    category: str | None = None
+    submission_type: Literal["email", "form"] = "email"
+    form_url: str | None = None
+    pdf_data: str | None = None  # Base64 encoded PDF
+
+
 @router.post("/intake", response_model=CaseIntakeResponse)
 def intake_case(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secret)) -> CaseIntakeResponse:
     db = get_supabase()
@@ -155,15 +283,21 @@ def intake_case(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secret
         if existing:
             return CaseIntakeResponse(id=existing["id"], status=existing.get("status", ""), case=existing, existing=True)
 
+        # Ensure email fields are always strings (validator should handle this, but double-check)
+        from_email = payload.from_email or "unknown@unknown.local"
+        to_email = payload.to_email or "unknown@unknown.local"
+        email_subject = payload.email_subject or ""
+        email_body = payload.email_body or ""
+
         created = insert_case(
             db,
             source=payload.source,
             message_id=payload.message_id,
             thread_id=payload.thread_id,
-            from_email=payload.from_email,
-            to_email=payload.to_email,
-            email_subject=payload.email_subject,
-            email_body=payload.email_body,
+            from_email=from_email,
+            to_email=to_email,
+            email_subject=email_subject,
+            email_body=email_body,
             vendor=payload.vendor,
             category=payload.category,
             estimated_value=payload.estimated_value,
@@ -192,9 +326,40 @@ def intake_case(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secret
         for event_type, details in agent2_result.events:
             insert_event(db, case_id=created["id"], actor="agent2", event_type=event_type, details=details)
 
+        # If category is "unknown", delete the case so it doesn't appear on dashboard
+        if updated.get("category") == "unknown":
+            delete_case(db, created["id"])
+            # Return a response indicating the case was deleted
+            return CaseIntakeResponse(
+                id=created["id"],
+                status="deleted",
+                case={"id": created["id"], "category": "unknown", "deleted": True},
+            )
+
         return CaseIntakeResponse(id=updated["id"], status=updated.get("status", ""), case=updated)
     except SupabaseError as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
+    except Exception as exc:  # noqa: BLE001
+        # Catch any unexpected errors and log them properly
+        import traceback
+        error_msg = str(exc)
+        error_type = type(exc).__name__
+        # Only include traceback in detail if it's safe to serialize
+        try:
+            tb_str = traceback.format_exc()
+        except Exception:  # noqa: BLE001
+            tb_str = "Traceback unavailable"
+        
+        # Ensure detail is JSON-serializable
+        error_details = {
+            "error": error_msg,
+            "type": error_type,
+        }
+        # Log the full traceback to help debug, but don't send it in response
+        print(f"ERROR in /cases/intake: {error_type}: {error_msg}")
+        print(tb_str)
+        
+        raise HTTPException(status_code=500, detail=error_details) from exc
 
 
 class ApproveRequest(BaseModel):
@@ -412,5 +577,122 @@ def run_agent2(case_id: UUID, _: None = Depends(require_admin_key)) -> RunAgent2
             insert_event(db, case_id=case["id"], actor="agent2", event_type=event_type, details=details)
 
         return RunAgent2Response(id=updated["id"], status=updated.get("status", ""), case=updated)
+    except SupabaseError as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
+
+
+@router.get("/email-drafts/pending", response_model=list[PendingDraftResponse])
+def get_pending_drafts_endpoint(_: None = Depends(require_n8n_secret)) -> list[PendingDraftResponse]:
+    """
+    Get all email drafts ready to send (awaiting approval).
+    Returns cases with status='awaiting_approval' that have draft emails.
+    n8n should poll this endpoint and send the emails via Gmail.
+    """
+    db = get_supabase()
+    try:
+        cases = get_pending_drafts(db, limit=100)
+
+        drafts = []
+        for case in cases:
+            # Determine the 'to' email - prefer contact_email from form_data, fallback to from_email
+            to_email = case.get("from_email") or "unknown@unknown.local"
+
+            form_data = case.get("form_data")
+            form_url = None
+            submission_type: Literal["email", "form"] = "email"
+            draft_body = case.get("draft_email_body") or ""
+
+            # Extract form_data and check URL to determine submission type
+            if isinstance(form_data, dict):
+                contact_email = form_data.get("contact_email")
+                if contact_email and isinstance(contact_email, str):
+                    to_email = contact_email
+                form_url = form_data.get("form_url")
+            elif isinstance(form_data, str):
+                try:
+                    import json as _json
+                    parsed = _json.loads(form_data)
+                    if isinstance(parsed, dict):
+                        contact_email = parsed.get("contact_email")
+                        if contact_email and isinstance(contact_email, str):
+                            to_email = contact_email
+                        form_url = parsed.get("form_url")
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # Check if draft body is in form format (starts with "Booking Reference:")
+            # or check URL: airline-claim.html → form
+            pdf_data = None
+            if draft_body.startswith("Booking Reference:") or (form_url and "airline-claim.html" in form_url):
+                submission_type = "form"
+                # Generate PDF from draft body
+                try:
+                    pdf_bytes = _generate_form_pdf(draft_body, vendor=case.get("vendor"))
+                    pdf_data = base64.b64encode(pdf_bytes).decode("utf-8")
+                except Exception as exc:  # noqa: BLE001
+                    # Log error but don't fail - PDF generation is optional
+                    import logging
+                    logging.error(f"Failed to generate PDF for case {case['id']}: {exc}")
+
+            drafts.append(
+                PendingDraftResponse(
+                    id=case["id"],
+                    case_id=case["id"],
+                    to=to_email,
+                    subject=case.get("draft_email_subject") or "",
+                    body_text=draft_body,
+                    form_data=form_data if isinstance(form_data, dict) else None,
+                    thread_id=case.get("thread_id"),
+                    message_id=case.get("message_id"),
+                    vendor=case.get("vendor"),
+                    category=case.get("category"),
+                    submission_type=submission_type,
+                    form_url=form_url,
+                    pdf_data=pdf_data,
+                )
+            )
+
+        return drafts
+    except SupabaseError as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+
+        error_details = {
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "traceback": traceback.format_exc(),
+        }
+        raise HTTPException(status_code=500, detail=error_details) from exc
+
+
+@router.post("/email-drafts/{case_id}/mark-sent", response_model=dict[str, Any])
+def mark_draft_sent(case_id: UUID, _: None = Depends(require_n8n_secret)) -> dict[str, Any]:
+    """
+    Mark a draft as sent (update status to 'submitted_to_vendor').
+    Call this after successfully sending the email or submitting the form.
+    """
+    db = get_supabase()
+    try:
+        case = get_case(db, str(case_id))
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        if case.get("status") != "awaiting_approval":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Case status is '{case.get('status')}', expected 'awaiting_approval'",
+            )
+
+        updated = update_case(db, str(case_id), {"status": "submitted_to_vendor"})
+        insert_event(
+            db,
+            case_id=str(case_id),
+            actor="agent1",
+            event_type="submitted_to_vendor",
+            details={"sent_via": "email", "marked_by": "n8n_polling"},
+        )
+
+        return {"id": updated["id"], "status": updated.get("status")}
     except SupabaseError as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc

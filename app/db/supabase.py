@@ -104,6 +104,17 @@ class SupabaseRESTClient:
             return data
         return {}
 
+    def delete(self, table: str, *, filters: dict[str, str]) -> None:
+        try:
+            resp = self._client.delete(f"{self.rest_url}/{table}", headers=self._headers(), params=filters)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise SupabaseError(
+                f"Supabase delete failed for {table}",
+                status_code=exc.response.status_code,
+                body=exc.response.text,
+            ) from exc
+
 
 _supabase: SupabaseRESTClient | None = None
 

@@ -47,9 +47,6 @@ class Settings:
     anthropic_model: str
     anthropic_timeout_seconds: float
 
-    stripe_secret_key: str | None
-    stripe_success_url: str
-    stripe_cancel_url: str
     success_fee_rate: float
 
 
@@ -71,10 +68,7 @@ def load_settings() -> Settings:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
         anthropic_timeout_seconds=_env_float("ANTHROPIC_TIMEOUT_SECONDS", 30.0),
-        stripe_secret_key=os.getenv("STRIPE_SECRET_KEY") or None,
-        stripe_success_url=os.getenv("STRIPE_SUCCESS_URL", "https://example.com/success"),
-        stripe_cancel_url=os.getenv("STRIPE_CANCEL_URL", "https://example.com/cancel"),
-        success_fee_rate=_env_float("SUCCESS_FEE_RATE", 0.2),
+        success_fee_rate=_env_float("SUCCESS_FEE_RATE", 0.1),
     )
 
 
