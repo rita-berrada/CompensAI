@@ -18,6 +18,9 @@ class ExtractionOutput(BaseModel):
     route: dict[str, Any] = Field(default_factory=dict)
     vendor: str | None = None
     category: str | None = None
+    order_number: str | None = None
+    tracking_number: str | None = None
+    operator: str | None = None
 
 
 class EligibilityOutput(BaseModel):
@@ -43,6 +46,21 @@ class ClaudeAgent2Output(BaseModel):
     claim: ClaimOutput
     draft: DraftOutput
     form_data: dict[str, Any] = Field(default_factory=dict)
+
+
+ALLOWED_CATEGORIES = {
+    "flight_delay",
+    "flight_cancellation",
+    "flight_denied_boarding",
+    "flight_baggage",
+    "delivery_late",
+    "delivery_missing",
+    "delivery_damaged",
+    "train_delay",
+    "train_cancellation",
+    "train_baggage",
+    "unknown",
+}
 
 
 @dataclass(frozen=True)
@@ -71,7 +89,8 @@ def run_claude_agent2(
     subject: str,
     body: str,
     extracted_fields: dict[str, Any] | None,
-    eu_rules: dict[str, Any],
+    kb: dict[str, Any],
+    company_site: dict[str, Any] | None,
 ) -> ClaudeAgent2Response:
     if not settings.anthropic_api_key:
         return ClaudeAgent2Response(
@@ -95,22 +114,28 @@ def run_claude_agent2(
         "email_subject": subject,
         "email_body": body,
         "extracted_fields": extracted_fields or {},
-        "eu261_rules": eu_rules,
+        "kb": kb,
+        "company_site": company_site or {},
     }
 
     instructions = (
         "You are Agent2 for compensation case processing.\n"
-        "Only handle EU261 categories: flight_delay and flight_cancellation.\n"
-        "If uncertain, set category='unknown' and eligibility.result='needs_info'.\n"
+        "Classify into one category from this list:\n"
+        + ", ".join(sorted(ALLOWED_CATEGORIES))
+        + "\n"
+        "If uncertain, set extraction.category='unknown' and eligibility.result='needs_info'.\n"
+        "If company_site contains policy text or form schema, use it.\n"
         "Return ONLY valid JSON with this exact structure:\n"
         "{"
         "\"extraction\": {\"flight_number\": string|null, \"booking_reference\": string|null, "
         "\"incident_date\": \"YYYY-MM-DD\"|null, \"delay_minutes\": int|null, \"route\": object, "
-        "\"vendor\": string|null, \"category\": string|null}, "
+        "\"vendor\": string|null, \"category\": string|null, "
+        "\"order_number\": string|null, \"tracking_number\": string|null, \"operator\": string|null}, "
         "\"eligibility\": {\"result\": string, \"reasons\": string[], \"confidence\": number|null}, "
         "\"claim\": {\"estimated_value_eur\": number|null, \"basis\": string}, "
         "\"draft\": {\"subject\": string, \"body\": string, \"preview\": string}, "
-        "\"form_data\": object"
+        "\"form_data\": {\"form_url\": string|null, \"contact_email\": string|null, "
+        "\"fields_to_fill\": object, \"playwright_steps\": any, \"form_schema\": any}"
         "}"
     )
 

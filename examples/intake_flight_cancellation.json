@@ -1,0 +1,14 @@
+{
+  "source": "gmail",
+  "message_id": "demo_flight_cancel_001",
+  "thread_id": "thread_flight_cancel_001",
+  "from": "no-reply@demo-airline.example",
+  "to": "rita@example.com",
+  "subject": "Important: Flight FR456 cancelled (DUB -> BCN)",
+  "body_text": "We regret to inform you that flight FR456 from DUB to BCN on 2026-02-12 has been cancelled. Booking reference ZXCVB1. Please review our policy and submit a claim if applicable. Policy: https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/airline.html Claim form: https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/airline-claim.html",
+  "extracted_fields": {
+    "route": { "from": "DUB", "to": "BCN" },
+    "route_distance_km": 1470
+  }
+}
+

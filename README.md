@@ -12,10 +12,14 @@ Supabase (`public.cases`, `public.case_events`) is the shared state + event log;
 - **Communication:** HTTP webhooks between n8n and FastAPI; Supabase is the source of truth.
 - **State:** one row per case in `public.cases` (current snapshot), append‑only timeline in `public.case_events`.
 - **Realtime UI:** Lovable subscribes to `cases` and `case_events` changes (Supabase realtime) to update dashboards + timelines.
-- **Agent 2 logic:** Claude-first extraction/decision with deterministic fallback, backed by local EU261 rules in `app/kb/eu261_rules.json`.
+- **Agent 2 logic:** Claude-first extraction/decision with deterministic fallback; supports flights + marketplace + trains and can fetch demo policy/form/contact pages (no Playwright submission in V1).
 
 ## Endpoints (implemented)
 Base URL: `http://localhost:8000`
+
+### `POST /emails/ingest` (Agent 1 → Backend, triage-first)
+Use this endpoint if n8n is sending *all* emails and you want the backend to decide **trash vs candidate**.
+Only candidates create a case and trigger Agent2.
 
 ### `POST /cases/intake` (Agent 1 → Backend)
 Optional auth header (recommended for server‑to‑server): `X-CompensAI-Webhook-Secret`
@@ -138,7 +142,7 @@ Optional:
 - `N8N_WEBHOOK_SECRET` (enables `X-CompensAI-Webhook-Secret` checks)
 - `AGENT1_SEND_WEBHOOK_URL` (approve → n8n send webhook)
 - `ANTHROPIC_API_KEY` (Claude for Agent 2)
-- `ANTHROPIC_MODEL` (default `claude-3-5-haiku-latest`)
+- `ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`)
 - `ANTHROPIC_TIMEOUT_SECONDS` (default `30`)
 - `STRIPE_SECRET_KEY`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`
 - `SUCCESS_FEE_RATE` (default `0.2`)
@@ -166,6 +170,21 @@ Expected behavior:
 - A new row appears in `public.cases` with extraction, eligibility, draft, and form fields populated.
 - Timeline rows appear in `public.case_events` (`email_scanned`, `draft_generated`, `awaiting_approval`).
 - If Claude is unavailable, the case is still processed via deterministic fallback and saved.
+
+## Quick tests (other domains)
+Airline cancellation (includes demo airline URLs in body):
+```bash
+curl -X POST http://localhost:8000/cases/intake \
+  -H "Content-Type: application/json" \
+  --data @examples/intake_flight_cancellation.json
+```
+
+Marketplace late delivery (vendor forced to `DemoRetail`; includes demo retail policy/contact URLs in body):
+```bash
+curl -X POST http://localhost:8000/cases/intake \
+  -H "Content-Type: application/json" \
+  --data @examples/intake_delivery_late.json
+```
 
 ## Supabase verification SQL
 Use Supabase SQL editor:

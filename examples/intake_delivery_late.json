@@ -1,0 +1,14 @@
+{
+  "source": "gmail",
+  "message_id": "demo_delivery_late_001",
+  "thread_id": "thread_delivery_late_001",
+  "from": "support@demoretail.example",
+  "to": "rita@example.com",
+  "subject": "Order #DR-100045 delivery delayed",
+  "body_text": "Hello, my order number DR-100045 is late. The promised delivery date was 2026-02-18 but it still hasn't arrived. Tracking number: TRK-778899. Please follow your policy: https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/retail-policy.html and contact details: https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/retail-contact.html",
+  "extracted_fields": {
+    "order_number": "DR-100045",
+    "tracking_number": "TRK-778899"
+  }
+}
+

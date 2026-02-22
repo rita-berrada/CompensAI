@@ -1,0 +1,26 @@
+{
+  "regulation": "EU_RAIL",
+  "scope": [
+    "train_delay",
+    "train_cancellation",
+    "train_baggage"
+  ],
+  "eligibility_rules": {
+    "delay_minutes_threshold": 60,
+    "notes": "Demo-grade rules based on EU rail passenger rights concepts. Use as guidance for drafting requests, not legal advice."
+  },
+  "snippets": [
+    {
+      "key": "train_delay_rule",
+      "text": "If arrival is significantly delayed, passengers can request compensation/refund per operator terms and EU rail passenger rights."
+    },
+    {
+      "key": "train_required_info",
+      "text": "Collect: operator, ticket/booking reference, journey date, scheduled and actual arrival time, and any announcements."
+    },
+    {
+      "key": "train_cancellation_rule",
+      "text": "For cancellations, request refund or re-routing and any applicable compensation per policy."
+    }
+  ]
+}

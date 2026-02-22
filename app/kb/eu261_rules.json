@@ -2,7 +2,9 @@
   "regulation": "EU261",
   "scope": [
     "flight_delay",
-    "flight_cancellation"
+    "flight_cancellation",
+    "flight_denied_boarding",
+    "flight_baggage"
   ],
   "eligibility_rules": {
     "delay_minutes_threshold": 180,
@@ -41,6 +43,14 @@
     {
       "key": "compensation_range",
       "text": "Compensation levels are commonly 250, 400, or 600 EUR depending on flight distance and conditions."
+    },
+    {
+      "key": "denied_boarding_rule",
+      "text": "Denied boarding/overbooking can qualify for EU261 compensation depending on circumstances."
+    },
+    {
+      "key": "baggage_checklist",
+      "text": "For baggage issues, collect baggage tag, PIR report number, receipts, photos (damage), and timeline of loss/delay."
     }
   ]
 }
