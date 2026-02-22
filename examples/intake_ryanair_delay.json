@@ -1,0 +1,22 @@
+{
+  "source": "gmail",
+  "message_id": "demo_ryanair_delay_004",
+  "thread_id": "thread_ryanair_delay_001",
+  "from_email": "no-reply@ryanair.com",
+  "to_email": "rita@example.com",
+  "email_subject": "Flight update: FR123 delayed from DUB to BCN",
+  "email_body": "We are sorry for the disruption. Flight FR123 from DUB to BCN on 2026-02-10 arrived 4 hours 15 minutes late. Booking reference ABCDEF.",
+  "vendor": "Ryanair",
+  "category": "flight_delay",
+  "flight_number": "FR123",
+  "booking_reference": "ABCDEF",
+  "incident_date": "2026-02-10",
+  "extracted_fields": {
+    "delay_minutes": 255,
+    "route": {
+      "from": "DUB",
+      "to": "BCN"
+    },
+    "route_distance_km": 1470
+  }
+}

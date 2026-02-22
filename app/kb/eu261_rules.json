@@ -1,0 +1,46 @@
+{
+  "regulation": "EU261",
+  "scope": [
+    "flight_delay",
+    "flight_cancellation"
+  ],
+  "eligibility_rules": {
+    "delay_minutes_threshold": 180,
+    "cancellation_candidate_unless_excluded": true,
+    "possible_exclusions_keywords": [
+      "extraordinary circumstances",
+      "weather",
+      "security risk",
+      "air traffic control strike",
+      "political instability"
+    ]
+  },
+  "compensation_tiers_eur": [
+    {
+      "max_distance_km": 1500,
+      "amount_eur": 250
+    },
+    {
+      "max_distance_km": 3500,
+      "amount_eur": 400
+    },
+    {
+      "max_distance_km": null,
+      "amount_eur": 600
+    }
+  ],
+  "snippets": [
+    {
+      "key": "delay_rule",
+      "text": "Compensation is generally considered when arrival delay is at least 3 hours."
+    },
+    {
+      "key": "cancellation_rule",
+      "text": "Cancellation claims can be valid unless carrier proves extraordinary circumstances."
+    },
+    {
+      "key": "compensation_range",
+      "text": "Compensation levels are commonly 250, 400, or 600 EUR depending on flight distance and conditions."
+    }
+  ]
+}
