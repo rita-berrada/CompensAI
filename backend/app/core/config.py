@@ -49,6 +49,9 @@ class Settings:
 
     success_fee_rate: float
 
+    gmail_credentials_file: str
+    gmail_token_file: str
+
 
 def load_settings() -> Settings:
     load_dotenv(override=False)
@@ -69,6 +72,8 @@ def load_settings() -> Settings:
         anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
         anthropic_timeout_seconds=_env_float("ANTHROPIC_TIMEOUT_SECONDS", 30.0),
         success_fee_rate=_env_float("SUCCESS_FEE_RATE", 0.1),
+        gmail_credentials_file=os.getenv("GMAIL_CREDENTIALS_FILE", "client_secret.json"),
+        gmail_token_file=os.getenv("GMAIL_TOKEN_FILE", "gmail_token.json"),
     )
 
 

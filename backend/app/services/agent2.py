@@ -812,11 +812,17 @@ def _deterministic_fallback(
         contact_email = _clean_str(case.get("from_email"))
     form_schema = (company_site or {}).get("form_schema")
     # form_url already extracted above for flights domain
+    portal_url: str | None = None
     if domain != "flights":
         form_url = None
         urls = (company_site or {}).get("urls")
         if isinstance(urls, dict):
             form_url = _clean_str(urls.get("claim_form_url"))
+    else:
+        # For airline cases also capture the portal (index) URL as Playwright start point
+        urls = (company_site or {}).get("urls")
+        if isinstance(urls, dict):
+            portal_url = _clean_str(urls.get("portal_url"))
 
     return {
         "extraction": {
@@ -846,6 +852,7 @@ def _deterministic_fallback(
             "preview": preview,
         },
         "form_data": {
+            "portal_url": portal_url,
             "form_url": form_url,
             "contact_email": contact_email,
             "form_schema": form_schema,
@@ -863,8 +870,8 @@ def _deterministic_fallback(
                 "requested_amount_eur": float(estimated_value) if isinstance(estimated_value, Decimal) else estimated_value,
             },
             "playwright_steps": [
-                {"note": "V1 demo: store a fill plan only (no auto-submit)."},
-                {"action": "open_url", "url": form_url} if form_url else {"action": "send_email", "to": contact_email},
+                {"note": "Playwright fills form fields and saves a screenshot — no auto-submit."},
+                {"action": "open_url", "url": portal_url or form_url} if (portal_url or form_url) else {"action": "send_email", "to": contact_email},
             ],
         },
     }

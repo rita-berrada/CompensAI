@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-AIRLINE_POLICY_URL = "https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/airline.html"
-AIRLINE_CLAIM_FORM_URL = "https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/airline-claim.html"
+_BASE = "https://skill-deploy-x4cr0r1eo8-codex-agent-deploys.vercel.app"
 
-RETAIL_POLICY_URL = "https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/retail-policy.html"
-RETAIL_CONTACT_URL = "https://skill-deploy-z31gmu05km-codex-agent-deploys.vercel.app/retail-contact.html"
+AIRLINE_PORTAL_URL = f"{_BASE}/index.html"        # multi-vendor index — Playwright starts here
+AIRLINE_POLICY_URL = f"{_BASE}/airline.html"
+AIRLINE_CLAIM_FORM_URL = f"{_BASE}/airline-claim.html"
+
+RETAIL_POLICY_URL = f"{_BASE}/retail-policy.html"
+RETAIL_CONTACT_URL = f"{_BASE}/retail-contact.html"
 
 DEMO_RETAIL_VENDOR = "DemoRetail"
 
@@ -35,5 +38,9 @@ def detect_site_family(*, urls: list[str], text: str) -> SiteFamily | None:
 
 def registry_urls(family: SiteFamily) -> dict[str, str]:
     if family == "airline":
-        return {"policy_url": AIRLINE_POLICY_URL, "claim_form_url": AIRLINE_CLAIM_FORM_URL}
+        return {
+            "portal_url": AIRLINE_PORTAL_URL,
+            "policy_url": AIRLINE_POLICY_URL,
+            "claim_form_url": AIRLINE_CLAIM_FORM_URL,
+        }
     return {"policy_url": RETAIL_POLICY_URL, "contact_url": RETAIL_CONTACT_URL}

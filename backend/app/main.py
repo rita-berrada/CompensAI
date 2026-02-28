@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.supabase import get_supabase, shutdown_supabase
 from app.routers.cases import router as cases_router
 from app.routers.emails import router as emails_router
+from app.routers.gmail import router as gmail_router
 
 
 @asynccontextmanager
@@ -38,3 +39,4 @@ def health() -> dict[str, str]:
 
 app.include_router(cases_router)
 app.include_router(emails_router)
+app.include_router(gmail_router)

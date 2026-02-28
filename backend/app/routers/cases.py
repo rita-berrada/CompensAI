@@ -4,6 +4,7 @@ import base64
 import re
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
@@ -32,6 +33,9 @@ from app.repositories.cases import (
 )
 from app.services.agent2 import process_case
 from app.services.billing import run_billing_if_resolved
+from app.services.form_filler import fill_form
+
+SCREENSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "screenshots"
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -664,6 +668,107 @@ def get_pending_drafts_endpoint(_: None = Depends(require_n8n_secret)) -> list[P
             "traceback": traceback.format_exc(),
         }
         raise HTTPException(status_code=500, detail=error_details) from exc
+
+
+class FillFormResponse(BaseModel):
+    id: str
+    success: bool
+    url: str
+    fields_filled: list[str]
+    fields_skipped: list[str]
+    screenshot_path: str | None = None
+    error: str | None = None
+
+
+@router.post("/{case_id}/fill-form", response_model=FillFormResponse)
+def fill_case_form(case_id: UUID, _: None = Depends(require_admin_key)) -> FillFormResponse:
+    """
+    Use Playwright to navigate to the case's claim form URL and fill every
+    recognisable field with the extracted case data.  The form is NOT submitted —
+    a screenshot of the filled form is saved to disk for human review.
+    """
+    db = get_supabase()
+    try:
+        case = get_case(db, str(case_id))
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        form_data = case.get("form_data") or {}
+        if isinstance(form_data, str):
+            import json as _json
+            try:
+                form_data = _json.loads(form_data)
+            except Exception:  # noqa: BLE001
+                form_data = {}
+
+        # Prefer portal_url as Playwright starting point (navigates through vendor index),
+        # fall back to the direct claim form URL.
+        start_url = ""
+        if isinstance(form_data, dict):
+            start_url = (form_data.get("portal_url") or form_data.get("form_url") or "").strip()
+        if not start_url:
+            raise HTTPException(status_code=409, detail="No form_url or portal_url found in case form_data")
+
+        fields_to_fill: dict[str, Any] = {}
+        vendor: str | None = None
+        if isinstance(form_data, dict):
+            raw = form_data.get("fields_to_fill")
+            if isinstance(raw, dict):
+                fields_to_fill = dict(raw)
+            vendor = fields_to_fill.get("vendor") or case.get("vendor")
+
+        # Inject complaint_summary from the draft body so the textarea gets filled.
+        if "complaint_summary" not in fields_to_fill or not fields_to_fill["complaint_summary"]:
+            draft_body = case.get("draft_email_body") or ""
+            complaint_summary: str | None = None
+            for line in draft_body.splitlines():
+                if line.startswith("Complaint Summary:"):
+                    complaint_summary = line.replace("Complaint Summary:", "").strip()
+                    break
+            if not complaint_summary and draft_body.strip():
+                # Fall back to a truncated version of the full draft body
+                complaint_summary = draft_body.strip()[:500]
+            if complaint_summary:
+                fields_to_fill["complaint_summary"] = complaint_summary
+
+        result = fill_form(start_url, fields_to_fill, screenshot_dir=SCREENSHOT_DIR, vendor=vendor)
+
+        if result.success:
+            decision_json = case.get("decision_json") or {}
+            decision_json["form_fill"] = {
+                "url": result.url,
+                "fields_filled": result.fields_filled,
+                "fields_skipped": result.fields_skipped,
+                "screenshot_path": result.screenshot_path,
+            }
+            update_case(db, case["id"], {"decision_json": decision_json})
+            insert_event(
+                db,
+                case_id=case["id"],
+                actor="system",
+                event_type="form_filled",
+                details={
+                    "url": result.url,
+                    "fields_filled": result.fields_filled,
+                    "screenshot_path": result.screenshot_path,
+                },
+            )
+
+        return FillFormResponse(
+            id=str(case_id),
+            success=result.success,
+            url=result.url,
+            fields_filled=result.fields_filled,
+            fields_skipped=result.fields_skipped,
+            screenshot_path=result.screenshot_path,
+            error=result.error,
+        )
+    except HTTPException:
+        raise
+    except SupabaseError as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail={"error": str(exc)}) from exc
 
 
 @router.post("/email-drafts/{case_id}/mark-sent", response_model=dict[str, Any])

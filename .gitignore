@@ -2,15 +2,20 @@
 __pycache__/
 *.pyc
 
-# Environment variables (important for Supabase keys later)
+# Virtual environments
+venv/
+
+# Environment variables
 .env
 
-# Virtual environments (you will likely create one)
-venv/
-.env/
+# Google OAuth credentials
+client_secret.json
+token.json
+token.pickle
+gmail_token.json
 
-# VS Code local settings
-.vscode/
+# Node
+node_modules/
 
 # Mac files
 .DS_Store
@@ -19,3 +24,6 @@ venv/
 *.log
 *.sqlite
 logs/
+
+# Screenshots from Playwright form filler
+screenshots/
