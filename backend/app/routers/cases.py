@@ -33,7 +33,8 @@ from app.repositories.cases import (
 )
 from app.services.agent2 import process_case
 from app.services.billing import run_billing_if_resolved
-from app.services.form_filler import fill_form
+from app.services.form_filler import fill_form, submit_form
+from app.services.gmail import get_gmail_service
 
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "screenshots"
 
@@ -366,131 +367,6 @@ def intake_case(payload: CaseIntakeRequest, _: None = Depends(require_n8n_secret
         raise HTTPException(status_code=500, detail=error_details) from exc
 
 
-class ApproveRequest(BaseModel):
-    approved_by: str | None = None
-    notes: str | None = None
-    send_via: Literal["email", "form"] = "email"
-    dry_run: bool = False
-
-
-class ApproveResponse(BaseModel):
-    id: str
-    status: str
-    case: dict[str, Any]
-
-
-@router.post("/{case_id}/approve", response_model=ApproveResponse)
-def approve_case(case_id: UUID, payload: ApproveRequest, _: None = Depends(require_admin_key)) -> ApproveResponse:
-    db = get_supabase()
-    try:
-        case = get_case(db, str(case_id))
-        if not case:
-            raise HTTPException(status_code=404, detail="Case not found")
-
-        draft_subject = case.get("draft_email_subject")
-        draft_body = case.get("draft_email_body")
-        if not draft_subject or not draft_body:
-            raise HTTPException(status_code=409, detail="No draft available to approve")
-
-        # If Agent2 found a better contact email (e.g. marketplace contact page), use it.
-        form_data = case.get("form_data")
-        contact_email: str | None = None
-        if isinstance(form_data, dict):
-            contact_email = form_data.get("contact_email")
-        elif isinstance(form_data, str):
-            try:
-                import json as _json
-
-                parsed = _json.loads(form_data)
-                if isinstance(parsed, dict):
-                    contact_email = parsed.get("contact_email")
-            except Exception:  # noqa: BLE001
-                contact_email = None
-
-        to_email = case.get("from_email")
-        if payload.send_via == "email" and contact_email:
-            to_email = contact_email
-
-        if not settings.agent1_send_webhook_url and not payload.dry_run:
-            raise HTTPException(
-                status_code=409, detail="AGENT1_SEND_WEBHOOK_URL not configured (or set dry_run=true)"
-            )
-
-        webhook_ran = False
-        webhook_status: int | None = None
-        webhook_error: str | None = None
-
-        if settings.agent1_send_webhook_url and not payload.dry_run:
-            try:
-                webhook_ran = True
-                resp = httpx.post(
-                    settings.agent1_send_webhook_url,
-                    json={
-                        "case_id": case["id"],
-                        "send_via": payload.send_via,
-                        # For hackathon: reply to the vendor email address we received.
-                        "to_email": to_email,
-                        "subject": draft_subject,
-                        "body": draft_body,
-                        "form_data": case.get("form_data"),
-                        "thread_id": case.get("thread_id"),
-                        "message_id": case.get("message_id"),
-                    },
-                    timeout=20,
-                )
-                webhook_status = resp.status_code
-                resp.raise_for_status()
-            except Exception as exc:  # noqa: BLE001 - we want to surface n8n errors clearly
-                webhook_error = str(exc)
-
-        if webhook_error:
-            insert_event(
-                db,
-                case_id=case["id"],
-                actor="system",
-                event_type="submission_failed",
-                details={
-                    "approved_by": payload.approved_by,
-                    "notes": payload.notes,
-                    "send_via": payload.send_via,
-                    "to_email": to_email,
-                    "dry_run": payload.dry_run,
-                    "agent1_webhook": {
-                        "configured": bool(settings.agent1_send_webhook_url),
-                        "ran": webhook_ran,
-                        "status": webhook_status,
-                        "error": webhook_error,
-                    },
-                },
-            )
-            raise HTTPException(status_code=502, detail={"error": "Agent1 webhook failed", "details": webhook_error})
-
-        updated = update_case(db, case["id"], {"status": "submitted_to_vendor"})
-        insert_event(
-            db,
-            case_id=case["id"],
-            actor="system",
-            event_type="submitted_to_vendor",
-            details={
-                "approved_by": payload.approved_by,
-                "notes": payload.notes,
-                "send_via": payload.send_via,
-                "to_email": to_email,
-                "dry_run": payload.dry_run,
-                "agent1_webhook": {
-                    "configured": bool(settings.agent1_send_webhook_url),
-                    "ran": webhook_ran,
-                    "status": webhook_status,
-                    "error": webhook_error,
-                },
-            },
-        )
-
-        return ApproveResponse(id=updated["id"], status=updated.get("status", ""), case=updated)
-    except SupabaseError as exc:
-        raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
-
-
 class VendorResponseRequest(BaseModel):
     outcome: Literal["accepted", "rejected", "needs_info", "unknown"] = "unknown"
     resolved: bool | None = None
@@ -740,6 +616,9 @@ def fill_case_form(case_id: UUID, _: None = Depends(require_admin_key)) -> FillF
                 "fields_filled": result.fields_filled,
                 "fields_skipped": result.fields_skipped,
                 "screenshot_path": result.screenshot_path,
+                "screenshot_filename": Path(result.screenshot_path).name if result.screenshot_path else None,
+                "video_filename": Path(result.video_path).name if result.video_path else None,
+                "fields_to_fill": fields_to_fill,
             }
             update_case(db, case["id"], {"decision_json": decision_json})
             insert_event(
@@ -763,6 +642,108 @@ def fill_case_form(case_id: UUID, _: None = Depends(require_admin_key)) -> FillF
             screenshot_path=result.screenshot_path,
             error=result.error,
         )
+    except HTTPException:
+        raise
+    except SupabaseError as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc), "supabase": exc.body}) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail={"error": str(exc)}) from exc
+
+
+@router.post("/{case_id}/approve")
+def approve_case(case_id: UUID, _: None = Depends(require_admin_key)) -> dict[str, Any]:
+    """
+    Unified approve endpoint.
+    - If the case has a portal/form URL: re-runs Playwright, fills the form, and clicks Submit.
+    - If no form URL: sends the AI-drafted email via Gmail.
+    Updates status to submitted_to_vendor either way.
+    """
+    db = get_supabase()
+    try:
+        case = get_case(db, str(case_id))
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        form_data = case.get("form_data") or {}
+        if isinstance(form_data, str):
+            try:
+                import json as _json
+                form_data = _json.loads(form_data)
+            except Exception:  # noqa: BLE001
+                form_data = {}
+
+        portal_url = (form_data.get("portal_url") or form_data.get("form_url") or "").strip() if isinstance(form_data, dict) else ""
+
+        if portal_url:
+            # Form submission path — Playwright fills + submits
+            fields_to_fill: dict[str, Any] = {}
+            if isinstance(form_data, dict):
+                raw = form_data.get("fields_to_fill")
+                if isinstance(raw, dict):
+                    fields_to_fill = dict(raw)
+            vendor: str | None = fields_to_fill.get("vendor") or case.get("vendor")
+
+            # Inject complaint_summary from draft body
+            if not fields_to_fill.get("complaint_summary"):
+                draft_body = case.get("draft_email_body") or ""
+                complaint_summary: str | None = None
+                for line in draft_body.splitlines():
+                    if line.startswith("Complaint Summary:"):
+                        complaint_summary = line.replace("Complaint Summary:", "").strip()
+                        break
+                if not complaint_summary and draft_body.strip():
+                    complaint_summary = draft_body.strip()[:500]
+                if complaint_summary:
+                    fields_to_fill["complaint_summary"] = complaint_summary
+
+            result = submit_form(portal_url, fields_to_fill, screenshot_dir=SCREENSHOT_DIR, vendor=vendor)
+            screenshot_filename = Path(result.screenshot_path).name if result.screenshot_path else None
+            video_filename = Path(result.video_path).name if result.video_path else None
+            decision_json = case.get("decision_json") or {}
+            decision_json["form_submit"] = {
+                "screenshot_filename": screenshot_filename,
+                "video_filename": video_filename,
+                "fields_filled": result.fields_filled,
+                "url": result.url,
+            }
+            update_case(db, case["id"], {"status": "submitted_to_vendor", "decision_json": decision_json})
+            insert_event(
+                db,
+                case_id=case["id"],
+                actor="system",
+                event_type="submitted_to_vendor",
+                details={"method": "playwright_form_submit", "url": portal_url},
+            )
+        else:
+            # Email send path
+            draft_subject = case.get("draft_email_subject")
+            draft_body = case.get("draft_email_body")
+            if not draft_subject or not draft_body:
+                raise HTTPException(status_code=409, detail="No draft available for this case")
+            try:
+                gmail = get_gmail_service(
+                    credentials_file=settings.gmail_credentials_file,
+                    token_file=settings.gmail_token_file,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            to_email: str = case.get("from_email") or "unknown@unknown.local"
+            if isinstance(form_data, dict):
+                contact = form_data.get("contact_email")
+                if contact and isinstance(contact, str) and contact.strip():
+                    to_email = contact.strip()
+            gmail.send_message(to_email, draft_subject, draft_body)
+            update_case(db, case["id"], {"status": "submitted_to_vendor"})
+            insert_event(
+                db,
+                case_id=case["id"],
+                actor="system",
+                event_type="submitted_to_vendor",
+                details={"method": "gmail_send", "to_email": to_email},
+            )
+
+        return {"id": str(case_id), "status": "submitted_to_vendor"}
+
     except HTTPException:
         raise
     except SupabaseError as exc:

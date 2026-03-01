@@ -11,12 +11,14 @@ const STATUS_MAP: Record<string, DisputeStatus> = {
   awaiting_approval: 'AWAITING_USER_APPROVAL',
   waiting_vendor: 'WAITING_VENDOR_RESPONSE',
   waiting_vendor_response: 'WAITING_VENDOR_RESPONSE',
+  submitted_to_vendor: 'WAITING_VENDOR_RESPONSE',
   resolved_success: 'RESOLVED_SUCCESS',
   resolved: 'RESOLVED_SUCCESS',
   resolved_rejected: 'RESOLVED_REJECTED',
   rejected: 'RESOLVED_REJECTED',
   discarded: 'DISCARDED_BY_USER',
   discarded_by_user: 'DISCARDED_BY_USER',
+  not_eligible: 'NOT_ELIGIBLE',
   failed: 'FAILED',
 };
 
@@ -24,7 +26,7 @@ function normalizeStatus(raw: string | null): DisputeStatus {
   if (!raw) return 'SCANNED_MATCH';
   // If already uppercase enum, pass through
   const upper = raw.toUpperCase();
-  if (['SCANNED_MATCH','AWAITING_USER_APPROVAL','WAITING_VENDOR_RESPONSE','RESOLVED_SUCCESS','RESOLVED_REJECTED','DISCARDED_BY_USER','FAILED'].includes(upper)) {
+  if (['SCANNED_MATCH','AWAITING_USER_APPROVAL','WAITING_VENDOR_RESPONSE','RESOLVED_SUCCESS','RESOLVED_REJECTED','DISCARDED_BY_USER','NOT_ELIGIBLE','FAILED'].includes(upper)) {
     return upper as DisputeStatus;
   }
   return STATUS_MAP[raw.toLowerCase()] ?? 'SCANNED_MATCH';
@@ -83,6 +85,7 @@ function caseRowToDispute(row: any): Dispute {
     email_body: row.email_body ?? undefined,
     draft_claim: row.draft_email_body ?? undefined,
     ai_reasons: aiReasons,
+    form_data: row.form_data ?? null,
     messages: [],
     agent_runs: [],
   };
@@ -229,6 +232,19 @@ class ApiClient {
       throw new Error('not found');
     } catch {
       return this.request(`/api/v1/disputes/${disputeId}`);
+    }
+  }
+
+  /** Approve a case — calls backend which submits form or sends email */
+  async approveClaim(caseId: string): Promise<void> {
+    const url = `${BASE_URL}/cases/${caseId}/approve`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-CompensAI-Admin-Key': 'hackai' },
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `Approve failed (${res.status})`);
     }
   }
 

@@ -8,6 +8,7 @@ const STATUS_CONFIG: Record<DisputeStatus, { label: string; className: string }>
   RESOLVED_SUCCESS: { label: 'Resolved', className: 'bg-success/15 text-success border border-success/30' },
   RESOLVED_REJECTED: { label: 'Rejected', className: 'bg-destructive/15 text-destructive border border-destructive/30' },
   DISCARDED_BY_USER: { label: 'Discarded', className: 'bg-muted text-muted-foreground' },
+  NOT_ELIGIBLE: { label: 'Not Eligible', className: 'bg-destructive/15 text-destructive border border-destructive/30' },
   FAILED: { label: 'Failed', className: 'bg-destructive/15 text-destructive border border-destructive/30' },
 };
 

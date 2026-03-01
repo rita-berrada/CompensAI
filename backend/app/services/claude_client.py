@@ -119,7 +119,10 @@ def run_claude_agent2(
     }
 
     instructions = (
-        "You are Agent2 for compensation case processing.\n"
+        "You are Agent2 helping a customer claim compensation.\n"
+        "The email provided was written BY the customer to us — you are acting on behalf of that customer.\n"
+        "draft.subject and draft.body MUST be written FROM the customer TO the airline/vendor, "
+        "formally claiming compensation. Never write as if you are the company or customer support replying.\n"
         "Classify into one category from this list:\n"
         + ", ".join(sorted(ALLOWED_CATEGORIES))
         + "\n"
@@ -143,7 +146,7 @@ def run_claude_agent2(
         client = Anthropic(api_key=settings.anthropic_api_key, timeout=settings.anthropic_timeout_seconds)
         response = client.messages.create(
             model=settings.anthropic_model,
-            max_tokens=1200,
+            max_tokens=2048,
             temperature=0,
             system=instructions,
             messages=[

@@ -9,6 +9,7 @@ import HITLActionBlock from '@/components/HITLActionBlock';
 import { Dispute, DisputeEconomics, DisputeStatus } from '@/types/dispute';
 import { MOCK_DISPUTES } from '@/data/mockDisputes';
 import { api } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 
@@ -51,14 +52,46 @@ const DisputeDetail = () => {
     fetchDispute();
   }, [fetchDispute]);
 
-  const handleDecision = async (decision: 'APPROVE' | 'REJECT', note?: string) => {
+  const handleDecision = async (
+    decision: 'APPROVE' | 'REJECT',
+    content?: string,
+    formFieldsOverride?: Record<string, unknown>
+  ) => {
     if (!dispute) return;
     setSubmitting(true);
     try {
-      await api.submitDecisionToSupabase(dispute.id, decision, note);
-      const newStatus: DisputeStatus = decision === 'APPROVE' ? 'WAITING_VENDOR_RESPONSE' : 'DISCARDED_BY_USER';
-      setDispute(prev => prev ? { ...prev, status: newStatus } : prev);
-      toast.success(decision === 'APPROVE' ? 'Claim approved and submitted!' : 'Draft rejected.');
+      if (decision === 'APPROVE') {
+        // For form cases: save any edited field values back into form_data before approving
+        if (formFieldsOverride && Object.keys(formFieldsOverride).length > 0) {
+          const currentFormData = (dispute.form_data as Record<string, unknown>) || {};
+          const updatedFormData = {
+            ...currentFormData,
+            fields_to_fill: {
+              ...((currentFormData.fields_to_fill as Record<string, unknown>) || {}),
+              ...formFieldsOverride,
+            },
+          };
+          await supabase
+            .from('cases')
+            .update({ form_data: updatedFormData })
+            .eq('id', dispute.id);
+        }
+        // For email cases: save edited draft
+        if (content && content !== dispute.draft_claim) {
+          await supabase
+            .from('cases')
+            .update({ draft_email_body: content })
+            .eq('id', dispute.id);
+        }
+        // Call backend — submits form via Playwright or sends edited email via Gmail
+        await api.approveClaim(dispute.id);
+        setDispute(prev => prev ? { ...prev, status: 'WAITING_VENDOR_RESPONSE' } : prev);
+        toast.success('Claim submitted to vendor!');
+      } else {
+        await api.submitDecisionToSupabase(dispute.id, decision, content);
+        setDispute(prev => prev ? { ...prev, status: 'DISCARDED_BY_USER' } : prev);
+        toast.success('Draft rejected.');
+      }
     } catch (err) {
       console.error('Decision error:', err);
       toast.error('Failed to submit decision. Please try again.');
@@ -190,6 +223,50 @@ const DisputeDetail = () => {
 
         {/* Right: Actions + Timeline */}
         <div className="space-y-6">
+          {/* Video / screenshot of filled form (if available) */}
+          {(dispute.draft_payload_json as Record<string, unknown> | null)?.form_fill && (() => {
+            const ff = (dispute.draft_payload_json as Record<string, unknown>).form_fill as Record<string, unknown>;
+            const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+            const videoFilename = ff?.video_filename as string | undefined;
+            const screenshotFilename = ff?.screenshot_filename as string | undefined;
+            if (!videoFilename && !screenshotFilename) return null;
+            return (
+              <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+                <p className="text-sm font-semibold text-foreground">Filled Form Recording</p>
+                {videoFilename ? (
+                  <video
+                    src={`${base}/screenshots/${videoFilename}`}
+                    controls
+                    autoPlay
+                    loop
+                    muted
+                    className="w-full rounded border border-border"
+                  />
+                ) : (
+                  <img src={`${base}/screenshots/${screenshotFilename}`} alt="Filled form screenshot" className="w-full rounded border border-border" />
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Not eligible explanation */}
+          {dispute.status === 'NOT_ELIGIBLE' && (
+            <div className="rounded-xl border border-destructive bg-card p-5 space-y-3">
+              <p className="text-sm font-semibold text-destructive">Not Eligible for Compensation</p>
+              <ul className="space-y-1.5">
+                {(dispute.ai_reasons && dispute.ai_reasons.length > 0
+                  ? dispute.ai_reasons
+                  : ['No specific reason provided.']
+                ).map((r, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
+                    <p className="text-sm text-muted-foreground">{r}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <HITLActionBlock dispute={dispute} onDecision={handleDecision} submitting={submitting} />
           <AgentTimeline status={(dispute.status ?? 'SCANNED_MATCH') as DisputeStatus} />
         </div>

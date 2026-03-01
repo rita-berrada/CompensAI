@@ -17,8 +17,14 @@ from app.repositories.cases import (
     insert_event,
     update_case,
 )
-from app.services.agent2 import process_case
+from pathlib import Path
+
+from app.services.agent2 import _infer_category, process_case
+from app.services.form_filler import fill_form
 from app.services.gmail import get_gmail_service
+
+SCREENSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "screenshots"
+SCREENSHOT_DIR.mkdir(exist_ok=True)
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
 
@@ -71,6 +77,14 @@ def scan_inbox(_: None = Depends(require_admin_key)) -> ScanInboxResponse:
                 continue
 
             data = gmail.get_message(message_id)
+            subject = data.get("subject", "")
+            body = data.get("body_text", "")
+
+            # Step 1: Relevance filter — skip non-claim emails (ads, personal, newsletters)
+            if _infer_category(subject, body) is None:
+                gmail.mark_processed(message_id)
+                skipped += 1
+                continue
 
             created_case = insert_case(
                 db,
@@ -79,8 +93,8 @@ def scan_inbox(_: None = Depends(require_admin_key)) -> ScanInboxResponse:
                 thread_id=data["thread_id"],
                 from_email=data["from_email"],
                 to_email=data["to_email"],
-                email_subject=data["subject"],
-                email_body=data["body_text"],
+                email_subject=subject,
+                email_body=body,
                 vendor=None,
                 category=None,
                 estimated_value=None,
@@ -103,18 +117,55 @@ def scan_inbox(_: None = Depends(require_admin_key)) -> ScanInboxResponse:
                 },
             )
 
+            # Step 2: Eligibility check via Agent2
             agent2_result = process_case(created_case, extracted_fields=None)
             updated = update_case(db, created_case["id"], agent2_result.case_updates)
 
             for event_type, details in agent2_result.events:
                 insert_event(db, case_id=created_case["id"], actor="agent2", event_type=event_type, details=details)
 
-            # Delete "unknown" category cases just like /cases/intake does
-            from app.repositories.cases import delete_case
-            if updated.get("category") == "unknown":
-                delete_case(db, created_case["id"])
-                skipped += 1
+            eligibility_result = updated.get("eligibility_result")
+
+            if eligibility_result == "eligible":
+                # Step 3a: Auto-fill form if a portal/form URL is available
+                form_data = updated.get("form_data") or {}
+                portal_url = form_data.get("portal_url") or form_data.get("form_url")
+                if portal_url:
+                    fields_to_fill = form_data.get("fields_to_fill") or {}
+                    # Inject complaint_summary from draft email body if not already present
+                    if not fields_to_fill.get("complaint_summary"):
+                        draft_body = updated.get("draft_email_body") or ""
+                        complaint_summary = None
+                        for line in draft_body.splitlines():
+                            if line.startswith("Complaint Summary:"):
+                                complaint_summary = line.replace("Complaint Summary:", "").strip()
+                                break
+                        if not complaint_summary and draft_body.strip():
+                            complaint_summary = draft_body.strip()[:500]
+                        if complaint_summary:
+                            fields_to_fill["complaint_summary"] = complaint_summary
+                    fill_result = fill_form(
+                        portal_url,
+                        fields_to_fill,
+                        screenshot_dir=SCREENSHOT_DIR,
+                        vendor=updated.get("vendor"),
+                    )
+                    if fill_result.screenshot_path:
+                        screenshot_filename = Path(fill_result.screenshot_path).name
+                        video_filename = Path(fill_result.video_path).name if fill_result.video_path else None
+                        decision_json = updated.get("decision_json") or {}
+                        decision_json["form_fill"] = {
+                            "screenshot_filename": screenshot_filename,
+                            "video_filename": video_filename,
+                            "fields_filled": fill_result.fields_filled,
+                            "url": fill_result.url,
+                            "fields_to_fill": fields_to_fill,
+                        }
+                        update_case(db, created_case["id"], {"decision_json": decision_json})
+                created += 1
             else:
+                # Step 3b: Not eligible — keep in DB with explanation, mark not_eligible
+                update_case(db, created_case["id"], {"status": "not_eligible"})
                 created += 1
 
             gmail.mark_processed(message_id)

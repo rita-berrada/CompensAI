@@ -5,6 +5,7 @@ export type DisputeStatus =
   | 'RESOLVED_SUCCESS'
   | 'RESOLVED_REJECTED'
   | 'DISCARDED_BY_USER'
+  | 'NOT_ELIGIBLE'
   | 'FAILED';
 
 export type DisputeCategory = 'flight_delay' | 'damaged_parcel' | 'late_delivery' | 'overcharge' | 'cancellation';
@@ -84,6 +85,9 @@ export interface Dispute {
   email_body?: string;
   draft_claim?: string;
   ai_reasons?: string[];
+
+  // Raw form data (portal URL + fields_to_fill from agent2)
+  form_data?: Record<string, unknown> | null;
 
   // Joined data
   messages?: MessageRow[];

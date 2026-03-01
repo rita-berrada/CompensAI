@@ -25,6 +25,7 @@ const ALL_STATUSES: DisputeStatus[] = [
   'RESOLVED_SUCCESS',
   'RESOLVED_REJECTED',
   'DISCARDED_BY_USER',
+  'NOT_ELIGIBLE',
   'FAILED',
 ];
 
@@ -35,6 +36,7 @@ const STATUS_LABELS: Record<DisputeStatus, string> = {
   RESOLVED_SUCCESS: 'Resolved',
   RESOLVED_REJECTED: 'Rejected',
   DISCARDED_BY_USER: 'Discarded',
+  NOT_ELIGIBLE: 'Not Eligible',
   FAILED: 'Failed',
 };
 
