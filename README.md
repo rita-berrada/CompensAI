@@ -4,15 +4,28 @@ CompensAI is an autonomous AI agent that monitors your Gmail inbox, detects comp
 
 🔗 [Devpost](https://devpost.com/software/compensai-choakb)
 
----
-
 ## Demo
 
 > Click the thumbnail to watch the demo
 
 [![Click to watch the CompensAI demo](https://img.youtube.com/vi/bpe9bpeoYO0/maxresdefault.jpg)](https://www.youtube.com/watch?v=bpe9bpeoYO0)
 
----
+## Architecture
+
+```mermaid
+flowchart TD
+    A[Gmail Inbox] -->|OAuth scan| B[Agent 1\nEmail Scanner]
+    B -->|POST /cases/intake| C[FastAPI Backend]
+    C -->|Claude Haiku| D[Agent 2\nEligibility Check + Draft]
+    D --> E[(Supabase)]
+    E --> F[React Dashboard\nHuman Review]
+    F -->|Approve / Edit| G[POST /cases/id/approve]
+    G --> H{Claim type}
+    H -->|Portal form| I[Agent 3\nPlaywright Form Fill]
+    H -->|Email claim| J[Agent 3\nGmail Send]
+    I --> K[Billing · Stripe]
+    J --> K
+```
 
 ## How it works
 
@@ -20,8 +33,6 @@ CompensAI is an autonomous AI agent that monitors your Gmail inbox, detects comp
 2. **Agent 2 — Analyse:** Claude checks eligibility against EU261/2004 and the Montreal Convention, estimates the claim value, and drafts a formal claim email or fills the vendor's web form
 3. **You — Review:** A dashboard shows you the AI's reasoning, the draft claim, and any pre-filled form fields. You can edit and approve or reject
 4. **Agent 3 — Submit:** Sends the email via Gmail or submits the vendor form headlessly via Playwright, records a video of the form being filled, calculates a 10% success fee, and generates a Stripe payment link
-
----
 
 ## Features
 
@@ -32,11 +43,9 @@ CompensAI is an autonomous AI agent that monitors your Gmail inbox, detects comp
 - **Form recording:** Playwright records a video of the form being filled so you can verify what was submitted
 - **Billing:** 10% success fee calculated on approval, Stripe Checkout link generated automatically
 
----
-
 ## Quick Start
 
-> **Note:** This project connects to your own accounts. You will need to set up your own API keys — none are included in this repository.
+> This project connects to your own accounts. You will need to set up your own API keys — none are included in this repository.
 
 ### Prerequisites
 
@@ -45,7 +54,7 @@ CompensAI is an autonomous AI agent that monitors your Gmail inbox, detects comp
 | **Supabase** | Free project + service role key | [supabase.com](https://supabase.com) |
 | **Anthropic** | API key | [console.anthropic.com](https://console.anthropic.com) |
 | **Google Cloud** | OAuth 2.0 client ID (Desktop app) + Gmail API enabled | [console.cloud.google.com](https://console.cloud.google.com) |
-| **Stripe** | Test secret key *(optional — for payment links only)* | [dashboard.stripe.com](https://dashboard.stripe.com) |
+| **Stripe** | Test secret key *(optional, for payment links only)* | [dashboard.stripe.com](https://dashboard.stripe.com) |
 
 ### Backend
 
@@ -78,8 +87,6 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
----
-
 ## Environment Variables
 
 Create `backend/.env`:
@@ -102,27 +109,6 @@ STRIPE_CANCEL_URL=https://your-domain.com/cancel
 
 CORS_ORIGINS=http://localhost:5173
 ```
-
----
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A[Gmail Inbox] -->|OAuth scan| B[Agent 1\nEmail Scanner]
-    B -->|POST /cases/intake| C[FastAPI Backend]
-    C -->|Claude Haiku| D[Agent 2\nEligibility Check + Draft]
-    D --> E[(Supabase)]
-    E --> F[React Dashboard\nHuman Review]
-    F -->|Approve / Edit| G[POST /cases/id/approve]
-    G --> H{Claim type}
-    H -->|Portal form| I[Agent 3\nPlaywright Form Fill]
-    H -->|Email claim| J[Agent 3\nGmail Send]
-    I --> K[Billing · Stripe]
-    J --> K
-```
-
----
 
 ## Project Structure
 
