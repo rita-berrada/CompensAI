@@ -85,7 +85,7 @@ const DisputeDetail = () => {
         }
         // Call backend — submits form via Playwright or sends edited email via Gmail
         await api.approveClaim(dispute.id);
-        setDispute(prev => prev ? { ...prev, status: 'WAITING_VENDOR_RESPONSE' } : prev);
+        await fetchDispute(); // re-fetch full case to pick up fee_amount + stripe_checkout_url
         toast.success('Claim submitted to vendor!');
       } else {
         await api.submitDecisionToSupabase(dispute.id, decision, content);

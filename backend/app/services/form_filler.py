@@ -363,8 +363,8 @@ def submit_form(
         screenshot_dir.mkdir(parents=True, exist_ok=True)
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True, slow_mo=1200)
-            context = browser.new_context(record_video_dir=str(screenshot_dir))
+            browser = pw.chromium.launch(headless=True, slow_mo=0)
+            context = browser.new_context()
             page = context.new_page()
 
             page.goto(url, timeout=30_000)
@@ -401,9 +401,6 @@ def submit_form(
                 except Exception:  # noqa: BLE001
                     skipped.append(name)
 
-            # Hold on the filled form so it's readable in the video recording
-            page.wait_for_timeout(4000)
-
             # Click the submit button
             submit_btn = page.query_selector(
                 'button[type="submit"], input[type="submit"], button:has-text("Submit")'
@@ -422,9 +419,7 @@ def submit_form(
 
             final_url = page.url
 
-            # Close page first so Playwright finalises the video file
             page.close()
-            video_path = str(page.video.path()) if page.video else None
             context.close()
             browser.close()
 

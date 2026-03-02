@@ -52,6 +52,10 @@ class Settings:
     gmail_credentials_file: str
     gmail_token_file: str
 
+    stripe_secret_key: str | None
+    stripe_success_url: str
+    stripe_cancel_url: str
+
 
 def load_settings() -> Settings:
     load_dotenv(override=False)
@@ -74,6 +78,9 @@ def load_settings() -> Settings:
         success_fee_rate=_env_float("SUCCESS_FEE_RATE", 0.1),
         gmail_credentials_file=os.getenv("GMAIL_CREDENTIALS_FILE", "client_secret.json"),
         gmail_token_file=os.getenv("GMAIL_TOKEN_FILE", "gmail_token.json"),
+        stripe_secret_key=os.getenv("STRIPE_SECRET_KEY") or None,
+        stripe_success_url=os.getenv("STRIPE_SUCCESS_URL", "https://compensai.com/success"),
+        stripe_cancel_url=os.getenv("STRIPE_CANCEL_URL", "https://compensai.com/cancel"),
     )
 
 

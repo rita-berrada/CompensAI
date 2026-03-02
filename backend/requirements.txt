@@ -8,4 +8,6 @@ reportlab>=4.0
 playwright>=1.40
 google-api-python-client>=2.100
 google-auth-oauthlib>=1.1
-google-auth-httplib2>=0.2aiofiles>=23.0
+google-auth-httplib2>=0.2
+aiofiles>=23.0
+stripe>=7.0

@@ -15,7 +15,6 @@ interface HITLActionBlockProps {
 const EDITABLE_FIELDS: { label: string; key: string }[] = [
   { label: 'Booking Reference', key: 'booking_reference' },
   { label: 'Flight Number', key: 'flight_number' },
-  { label: 'Incident Date', key: 'incident_date' },
   { label: 'Delay (minutes)', key: 'delay_minutes' },
 ];
 

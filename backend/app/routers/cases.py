@@ -33,6 +33,7 @@ from app.repositories.cases import (
 )
 from app.services.agent2 import process_case
 from app.services.billing import run_billing_if_resolved
+from app.services.billing import calculate_fee_and_create_payment_link
 from app.services.form_filler import fill_form, submit_form
 from app.services.gmail import get_gmail_service
 
@@ -741,6 +742,11 @@ def approve_case(case_id: UUID, _: None = Depends(require_admin_key)) -> dict[st
                 event_type="submitted_to_vendor",
                 details={"method": "gmail_send", "to_email": to_email},
             )
+
+        # Calculate success fee (10% of estimated_value) and create Stripe payment link
+        billing_updates = calculate_fee_and_create_payment_link(case)
+        if billing_updates:
+            update_case(db, case["id"], billing_updates)
 
         return {"id": str(case_id), "status": "submitted_to_vendor"}
 

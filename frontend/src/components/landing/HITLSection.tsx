@@ -14,14 +14,14 @@ const pipelineSteps = [
 
 const HITLSection = () => {
   const [phase, setPhase] = useState<DemoPhase>('idle');
-  const [countdown, setCountdown] = useState(5);
+  const [countdown, setCountdown] = useState(3);
 
   const handleApprove = useCallback(() => {
     if (phase !== 'idle') return;
     setPhase('filing');
     setTimeout(() => {
       setPhase('waiting');
-      setCountdown(5);
+      setCountdown(3);
     }, 1200);
   }, [phase]);
 
@@ -42,7 +42,7 @@ const HITLSection = () => {
     if (phase !== 'complete') return;
     const t = setTimeout(() => {
       setPhase('idle');
-      setCountdown(5);
+      setCountdown(3);
     }, 6000);
     return () => clearTimeout(t);
   }, [phase]);
@@ -263,7 +263,7 @@ const HITLSection = () => {
                           stroke="hsl(210,80%,50%)" strokeWidth="3"
                           strokeLinecap="round"
                           strokeDasharray={100.5}
-                          animate={{ strokeDashoffset: 100.5 * (1 - countdown / 5) }}
+                          animate={{ strokeDashoffset: 100.5 * (1 - countdown / 3) }}
                           transition={{ duration: 0.4 }}
                         />
                       </svg>

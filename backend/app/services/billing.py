@@ -50,3 +50,55 @@ def run_billing_if_resolved(case: dict[str, Any], *, recovered_amount: Decimal |
     insert_event(db, case_id=case["id"], actor="system", event_type="resolved", details={"status": "resolved"})
     update_case(db, case["id"], updates)
     insert_event(db, case_id=case["id"], actor="agent3", event_type="billing_created", details=decision_json["billing"])
+
+
+def calculate_fee_and_create_payment_link(case: dict[str, Any]) -> dict[str, Any]:
+    """
+    Calculate the 10% success fee from estimated_value and (if Stripe is configured)
+    create a Checkout Session so the customer can pay CompensAI.
+
+    Does NOT change case status — call this from the approve endpoint so the fee
+    and payment link are visible on the dashboard immediately after approval.
+    Returns a dict of DB fields ready to pass to update_case().
+    """
+    from app.core.config import settings  # late import avoids circular dependency
+
+    try:
+        estimated = Decimal(str(case.get("estimated_value") or "0"))
+    except Exception:  # noqa: BLE001
+        estimated = Decimal("0")
+
+    fee_rate = Decimal("0.1")
+    fee_amount = (estimated * fee_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    updates: dict[str, Any] = {
+        "fee_amount": float(fee_amount),
+        "recovered_amount": float(estimated),
+    }
+
+    if settings.stripe_secret_key:
+        try:
+            import stripe as _stripe  # noqa: PLC0415
+            _stripe.api_key = settings.stripe_secret_key
+            fee_cents = int(fee_amount * 100)
+            if fee_cents > 0:
+                session = _stripe.checkout.Session.create(
+                    payment_method_types=["card"],
+                    line_items=[{
+                        "price_data": {
+                            "currency": "eur",
+                            "product_data": {"name": f"CompensAI Success Fee — Case {case['id']}"},
+                            "unit_amount": fee_cents,
+                        },
+                        "quantity": 1,
+                    }],
+                    mode="payment",
+                    success_url=settings.stripe_success_url,
+                    cancel_url=settings.stripe_cancel_url,
+                )
+                updates["stripe_checkout_url"] = session.url
+                updates["stripe_checkout_session_id"] = session.id
+        except Exception:  # noqa: BLE001
+            pass  # Stripe unavailable — fee_amount is still saved
+
+    return updates

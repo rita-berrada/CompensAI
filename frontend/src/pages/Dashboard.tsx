@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, Shield, TrendingUp, Loader2, AlertCircle, ExternalLink, Receipt } from 'lucide-react';
+import { DollarSign, Shield, TrendingUp, Loader2, AlertCircle, ExternalLink, Receipt, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/StatusBadge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -108,9 +108,14 @@ const Dashboard = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Disputes</h1>
-        <p className="text-sm text-muted-foreground">Your autonomous claims, tracked end-to-end.</p>
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Disputes</h1>
+          <p className="text-sm text-muted-foreground">Your autonomous claims, tracked end-to-end.</p>
+        </div>
       </div>
 
       {/* Summary Cards */}
