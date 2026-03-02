@@ -14,17 +14,37 @@ CompensAI is an autonomous AI agent that monitors your Gmail inbox, detects comp
 
 ```mermaid
 flowchart TD
-    A[Gmail Inbox] -->|OAuth scan| B[Agent 1\nEmail Scanner]
+    A[Gmail Inbox] -->|OAuth scan| B[Agent 1 - Email Scanner]
     B -->|POST /cases/intake| C[FastAPI Backend]
-    C -->|Claude Haiku| D[Agent 2\nEligibility Check + Draft]
+    C -->|Claude Haiku| D[Agent 2 - Eligibility Check + Draft]
     D --> E[(Supabase)]
-    E --> F[React Dashboard\nHuman Review]
+    E --> F[React Dashboard - Human Review]
     F -->|Approve / Edit| G[POST /cases/id/approve]
     G --> H{Claim type}
-    H -->|Portal form| I[Agent 3\nPlaywright Form Fill]
-    H -->|Email claim| J[Agent 3\nGmail Send]
+    H -->|Portal form| I[Agent 3 - Playwright Form Fill]
+    H -->|Email claim| J[Agent 3 - Gmail Send]
     I --> K[Billing · Stripe]
     J --> K
+```
+
+## Project Structure
+
+```
+compensation-agent/
+├── backend/
+│   ├── app/
+│   │   ├── core/           # config, security
+│   │   ├── db/             # Supabase client
+│   │   ├── repositories/   # DB queries
+│   │   ├── routers/        # API endpoints (cases, gmail)
+│   │   └── services/       # agent2 (LLM), form_filler, billing
+│   ├── scripts/
+│   │   └── gmail_auth.py   # one-time Gmail OAuth setup
+│   └── requirements.txt
+└── frontend/
+    └── src/
+        ├── pages/          # Dashboard, DisputeDetail, Landing
+        └── components/     # HITLActionBlock, AgentTimeline, etc.
 ```
 
 ## How it works
@@ -108,24 +128,4 @@ STRIPE_SUCCESS_URL=https://your-domain.com/success
 STRIPE_CANCEL_URL=https://your-domain.com/cancel
 
 CORS_ORIGINS=http://localhost:5173
-```
-
-## Project Structure
-
-```
-compensation-agent/
-├── backend/
-│   ├── app/
-│   │   ├── core/           # config, security
-│   │   ├── db/             # Supabase client
-│   │   ├── repositories/   # DB queries
-│   │   ├── routers/        # API endpoints (cases, gmail)
-│   │   └── services/       # agent2 (LLM), form_filler, billing
-│   ├── scripts/
-│   │   └── gmail_auth.py   # one-time Gmail OAuth setup
-│   └── requirements.txt
-└── frontend/
-    └── src/
-        ├── pages/          # Dashboard, DisputeDetail, Landing
-        └── components/     # HITLActionBlock, AgentTimeline, etc.
 ```
